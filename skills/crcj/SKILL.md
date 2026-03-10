@@ -15,7 +15,7 @@ The skill automates the process of:
 2. Checking CI job status for each PR
 3. Investigating failed jobs
 4. Restarting jobs that failed due to infrastructure issues
-5. Special handling for the "All Required Checks Passed" job
+5. Special handling for the "all-jobs-are-green" job
 
 ## When This Skill Applies
 
@@ -95,9 +95,9 @@ gh api repos/DataDog/dd-trace-rb/commits/<COMMIT_SHA>/check-runs \
 gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
 ```
 
-## Special Case: "All Required Checks Passed" Job
+## Special Case: "all-jobs-are-green" Job
 
-**Job name:** "All Required Checks Passed" (or similar - verify exact name from actual PR)
+**Job name:** "all-jobs-are-green"
 
 **Special handling:**
 - This is a status check that depends on all other checks passing
@@ -106,18 +106,18 @@ gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
 
 **Detection:**
 ```bash
-# Check if only "All Required Checks Passed" is failing
+# Check if only "all-jobs-are-green" is failing
 checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,conclusion)
 
 # Parse to see if only this check failed
 echo "$checks" | jq 'map(select(.conclusion == "failure")) | length'
-# If count is 1, check if it's the "All Required Checks Passed" job
+# If count is 1, check if it's the "all-jobs-are-green" job
 echo "$checks" | jq -r 'map(select(.conclusion == "failure"))[0].name'
 ```
 
 **Immediate restart:**
 ```bash
-# If it's the only failure and it's the "All Required Checks Passed" job
+# If it's the only failure and it's the "all-jobs-are-green" job
 gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
 ```
 
@@ -146,12 +146,12 @@ When the skill is invoked:
        continue
      fi
 
-     # Check for "All Required Checks Passed" special case
+     # Check for "all-jobs-are-green" special case
      failed_count=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure")] | length')
      if [ "$failed_count" -eq 1 ]; then
        failed_name=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure")][0].name')
-       if [[ "$failed_name" == *"Required"*"Checks"* ]] || [[ "$failed_name" == *"All"*"green"* ]]; then
-         echo "  🔄 Only 'All Required Checks Passed' failing, restarting immediately"
+       if [[ "$failed_name" == "all-jobs-are-green" ]]; then
+         echo "  🔄 Only 'all-jobs-are-green' failing, restarting immediately"
          # Get run ID and restart
          # gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
        fi
@@ -272,7 +272,7 @@ Use these patterns to detect infrastructure failures in logs:
 ## PR #4570: Refactor probe manager
 ❌ Failed checks: 1
 
-  🔄 RESTARTED: "All Required Checks Passed"
+  🔄 RESTARTED: "all-jobs-are-green"
      Reason: Only failing job (all other checks green)
      Run ID: 12345680
 
@@ -347,4 +347,4 @@ To test without actually restarting jobs:
 - Always err on the side of caution: if unsure whether a failure is infrastructure-related, DON'T restart
 - Log all restart decisions for audit trail
 - Consider rate limiting to avoid overwhelming GitHub Actions
-- The "All Required Checks Passed" job name may vary - check actual PR to confirm exact name
+- The "all-jobs-are-green" job name has been verified from actual PRs in DataDog/dd-trace-rb
