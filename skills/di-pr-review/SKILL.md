@@ -476,6 +476,232 @@ Decision guide for log levels:
 - WARN: Invalid configuration, missing required files, permission errors, unsupported Ruby version
 ```
 
+## Line Probe Test Files
+
+**Overview:** The DI test suite includes special test files that use line numbers to test line probes. These files have specific line numbers referenced in test assertions, and changing line numbers breaks the tests.
+
+**Critical Requirement:** When these files are modified, verify that:
+1. Changes only add lines at the end of the file, OR
+2. All test assertions referencing line numbers are updated accordingly
+
+### Identifying Line Probe Test Files
+
+Line probe test files typically:
+- Are located in `spec/datadog/di/` directory
+- Have names like `*_line_probe_*`, `*_target_*`, or `*_probe_test_file_*`
+- Contain comments marking line numbers: `# line probe at 42`, `# Line: 123`, etc.
+- Are referenced by tests that specify exact line numbers in probe configurations
+
+**Common patterns to search for:**
+```bash
+# Find test files with line number markers
+grep -r "# line" spec/datadog/di/
+grep -r "# Line:" spec/datadog/di/
+
+# Find test files referenced by line number in specs
+grep -r "lineno.*=.*[0-9]" spec/datadog/di/
+grep -r "line:.*[0-9]" spec/datadog/di/
+```
+
+### Verification Steps
+
+When a line probe test file is modified in the PR:
+
+1. **Check the nature of changes:**
+   ```bash
+   # View the diff for the file
+   gh pr diff <PR_NUMBER> -- path/to/test_file.rb
+   ```
+
+2. **Determine if lines were added/removed/changed:**
+   - ✅ **Safe:** Lines only added at the end of the file
+   - ⚠️ **Requires verification:** Lines added/removed/changed in the middle
+
+3. **If middle changes detected, find all line number references:**
+   ```bash
+   # Find tests that reference this file by line number
+   grep -r "$(basename test_file.rb)" spec/datadog/di/ | grep -E "lineno|line:"
+   ```
+
+4. **Verify test updates:**
+   - Check that all line number references in tests are updated
+   - Ensure line numbers still point to the intended code
+   - Run the specific tests to verify they pass
+
+### Example Scenarios
+
+#### Scenario 1: Safe - Lines Added at End ✅
+
+```ruby
+# File: spec/datadog/di/support/test_target.rb
+class TestTarget
+  def method_one  # Line 2 - referenced in tests
+    puts "one"
+  end
+
+  def method_two  # Line 6 - referenced in tests
+    puts "two"
+  end
+
+  # NEW: Lines added at end - no line numbers changed
+  def method_three  # Line 11 - NEW
+    puts "three"
+  end
+end
+```
+
+**Verification:** ✅ No updates needed - existing line numbers unchanged
+
+#### Scenario 2: Dangerous - Lines Added in Middle ⚠️
+
+```ruby
+# File: spec/datadog/di/support/test_target.rb
+class TestTarget
+  def method_one  # Line 2 - referenced in tests
+    puts "one"
+  end
+
+  # NEW: Line added here shifts everything below
+  def method_new  # Line 7 - NEW
+    puts "new"
+  end
+
+  def method_two  # Line 11 - MOVED FROM LINE 6!
+    puts "two"
+  end
+end
+```
+
+**Required verification:**
+- Tests referencing line 6 must now reference line 11
+- Check all tests that use `test_target.rb` with line numbers
+
+#### Scenario 3: Test Updated Correctly ✅
+
+```ruby
+# Before PR:
+it 'sets probe at method_two' do
+  probe = Datadog::DI::Probe.new(
+    file: 'spec/datadog/di/support/test_target.rb',
+    lineno: 6  # method_two
+  )
+  # test continues...
+end
+
+# After PR (correctly updated):
+it 'sets probe at method_two' do
+  probe = Datadog::DI::Probe.new(
+    file: 'spec/datadog/di/support/test_target.rb',
+    lineno: 11  # method_two - UPDATED
+  )
+  # test continues...
+end
+```
+
+#### Scenario 4: Test NOT Updated - BUG ❌
+
+```ruby
+# After PR (NOT updated - still references old line):
+it 'sets probe at method_two' do
+  probe = Datadog::DI::Probe.new(
+    file: 'spec/datadog/di/support/test_target.rb',
+    lineno: 6  # BUG: This is now method_new, not method_two!
+  )
+  # test continues...
+end
+```
+
+**This will cause test failures or incorrect behavior!**
+
+### Review Checklist for Line Probe Files
+
+When a line probe test file is modified:
+
+- [ ] **Identify the file as a line probe test file**
+  - Check filename patterns
+  - Look for line number markers in comments
+  - Find references in test specs
+
+- [ ] **Analyze the changes:**
+  - [ ] Lines only added at end? → No further action needed ✅
+  - [ ] Lines added/removed in middle? → Continue verification ⚠️
+
+- [ ] **Find all line number references:**
+  ```bash
+  grep -r "$(basename modified_file.rb)" spec/datadog/di/
+  ```
+
+- [ ] **For each reference, verify:**
+  - [ ] Line number still points to correct method/statement
+  - [ ] Test assertions are still valid
+  - [ ] Test passes with updated line numbers
+
+- [ ] **Run affected tests:**
+  ```bash
+  bundle exec rspec spec/datadog/di/*_spec.rb -e "pattern matching test name"
+  ```
+
+### Common Line Probe Test Files
+
+Files that commonly contain line number markers:
+- `spec/datadog/di/support/test_target.rb`
+- `spec/datadog/di/support/probe_test_file.rb`
+- `spec/datadog/di/integration/line_probe_test_file.rb`
+- Any file in `spec/datadog/di/` with `target` or `probe_test` in the name
+
+**Note:** This list may not be exhaustive. Always search for line number references when in doubt.
+
+### Commands Reference
+
+```bash
+# Find line probe test files
+find spec/datadog/di -name "*target*" -o -name "*probe_test*"
+grep -r "# [Ll]ine" spec/datadog/di/
+
+# Check if a file is referenced by line number
+file="test_target.rb"
+grep -r "$file" spec/datadog/di/ | grep -E "lineno|line:"
+
+# View PR diff for specific file
+gh pr diff <PR_NUMBER> -- path/to/file.rb
+
+# Run specific tests
+bundle exec rspec spec/datadog/di/probe_spec.rb
+```
+
+### Feedback Template
+
+When line probe test files are modified incorrectly:
+
+```markdown
+⚠️ WARNING: Line probe test file modified
+
+**File:** spec/datadog/di/support/test_target.rb
+
+**Issue:** Lines were added/removed in the middle of the file, which shifts line numbers for existing methods. Tests that reference this file by line number may now be broken.
+
+**Analysis:**
+- Line 6 was `def method_two`, now it's `def method_new`
+- Line 11 is now `def method_two` (moved from line 6)
+
+**Tests that need verification:**
+- spec/datadog/di/probe_spec.rb:145 - references line 6
+- spec/datadog/di/line_probe_integration_spec.rb:234 - references line 6
+- spec/datadog/di/probe_manager_spec.rb:89 - references line 6
+
+**Required action:**
+1. Update all line number references from 6 to 11 where they should point to method_two
+2. Verify the tests still pass and test the intended behavior
+3. Consider adding comments to mark important line numbers:
+   ```ruby
+   def method_two  # Line 11 - used in probe tests
+     puts "two"
+   end
+   ```
+
+**Alternative:** If possible, add new methods at the end of the file to avoid shifting existing line numbers.
+```
+
 ## Review Checklist
 
 When reviewing a dd-trace-rb DI PR, verify:
@@ -495,6 +721,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] Performance overhead documented and <5%
 - [ ] Thread-safe shared state access
 - [ ] Fork/fiber edge cases handled
+- [ ] Line probe test files verified (see Line Probe Test Files section)
 - [ ] Documentation updated
 - [ ] CHANGELOG updated if required
 - [ ] Trailing commas used in di/ and symbol_database/ directories (per CLAUDE.md)
@@ -505,15 +732,18 @@ To review a dd-trace-rb dynamic instrumentation PR:
 
 1. **Fetch the PR**: Use `gh pr view <number>` or `gh pr checkout <number>`
 2. **Read changed files**: Focus on new instrumentation code
-3. **Run critical checks**:
+3. **Check for line probe test file modifications**:
+   - Identify if any line probe test files were modified
+   - Verify line number changes are safe (additions at end) or tests are updated
+4. **Run critical checks**:
    - Search for skipped tests
    - Search for sleep in tests
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
-4. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, RuboCop
-5. **Run tests**: `bundle exec rspec` with coverage
-6. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
+5. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, RuboCop
+6. **Run tests**: `bundle exec rspec` with coverage
+7. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
 
 ## Commands to Run
 
@@ -544,6 +774,16 @@ grep -rn "rescue\s*=>" lib/datadog/di/ | while read line; do
     echo "Missing telemetry: $file:$lineno"
   fi
 done
+
+# Check for modified line probe test files
+gh pr diff <PR_NUMBER> --name-only | grep -E "spec/datadog/di/.*target|spec/datadog/di/.*probe_test"
+
+# Find line number references in tests
+grep -rn "lineno.*=.*[0-9]\|line:.*[0-9]" spec/datadog/di/
+
+# Check if specific file is referenced by line number
+file="test_target.rb"
+grep -r "$file" spec/datadog/di/ | grep -E "lineno|line:"
 ```
 
 ## Output Format
@@ -577,7 +817,15 @@ Provide review feedback in this structure:
 [Any rescue blocks without logging or telemetry]
 
 ## Additional Issues
-[Non-blocking issues]
+
+### ⚠️ Line Probe Test Files
+[If any line probe test files were modified:]
+- List modified files
+- Note if lines were added in middle (shifting line numbers)
+- List tests that may need line number updates
+- Verify tests have been updated or additions were at end of file
+
+[Other non-blocking issues]
 
 ## Recommendations
 [Suggestions for improvement]
