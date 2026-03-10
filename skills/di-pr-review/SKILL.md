@@ -35,8 +35,10 @@ All 6 requirements below are **BLOCKING**. PRs must not be approved until all is
   - Minitest: `skip`, `skip_if`, `skip_unless`
   - Any commented-out test methods
 - Flag EVERY skipped test as **CRITICAL**
-- Required resolution: Either fix the test to pass, or delete it entirely
+- Required resolution: Tests MUST be fixed to run and pass
+- If you cannot fix the test, ask for assistance
 - "Will fix later" is NOT acceptable
+- Deleting tests is NOT acceptable
 
 **How to check:**
 ```bash
@@ -51,9 +53,10 @@ grep -r "^\s*skip\|^\s*pending\|^\s*xit\|^\s*xdescribe" spec/ test/
 File: spec/dynamic_instrumentation/probe_spec.rb:145
 Line: skip "test fork behavior"
 
-This test must either:
-1. Be fixed to run and pass reliably, OR
-2. Be removed from the codebase
+This test MUST be fixed to run and pass reliably.
+
+If you cannot fix this test, ask for assistance from the team.
+Do not delete tests - they exist for a reason and must be made to work.
 
 Skipped tests create false confidence. This is blocking approval.
 ```
