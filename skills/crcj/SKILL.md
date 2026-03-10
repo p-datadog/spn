@@ -97,12 +97,12 @@ gh run view <RUN_ID> --repo DataDog/dd-trace-rb --log
 ### Step 5: Restart Infrastructure Failures
 
 ```bash
-# Get the workflow run ID from the check
-gh api repos/DataDog/dd-trace-rb/commits/<COMMIT_SHA>/check-runs \
-  --jq '.check_runs[] | select(.name == "<CHECK_NAME>") | .id'
+# Get the workflow run ID from the check's link field
+run_id=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,link | \
+  jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 
 # Restart the failed job
-gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
+gh run rerun $run_id --repo DataDog/dd-trace-rb --failed
 ```
 
 ## Special Case: "all-jobs-are-green" Job
@@ -145,8 +145,8 @@ When the skill is invoked:
    for pr in $(echo "$prs" | jq -r '.[].number'); do
      echo "Checking PR #$pr"
 
-     # Get check status
-     checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,state,workflow)
+     # Get check status (including link for extracting run IDs)
+     checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,state,link)
 
      # Find failed checks
      failed=$(echo "$checks" | jq -r '.[] | select(.state == "failure")')
@@ -171,8 +171,9 @@ When the skill is invoked:
        failed_name=$(echo "$checks" | jq -r '[.[] | select(.state == "failure")][0].name')
        if [[ "$failed_name" == "all-jobs-are-green" ]]; then
          echo "  🔄 Only 'all-jobs-are-green' failing, restarting immediately"
-         # Get run ID and restart
-         # gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
+         # Get run ID from link field and restart
+         run_id=$(echo "$checks" | jq -r '.[] | select(.name == "all-jobs-are-green") | .link | split("/") | .[-3]')
+         gh run rerun $run_id --repo DataDog/dd-trace-rb
        fi
      fi
 
@@ -186,10 +187,9 @@ When the skill is invoked:
 
 3. **For each failed check, get logs and analyze:**
    ```bash
-   # Get workflow run for the PR
-   runs=$(gh api repos/DataDog/dd-trace-rb/commits/$commit_sha/check-runs --jq '.check_runs[] | select(.name == "'$check_name'") | {id: .id, run_id: .run_id}')
-
-   run_id=$(echo "$runs" | jq -r '.run_id')
+   # Get workflow run ID from link field
+   run_id=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,link | \
+     jq -r '.[] | select(.name == "'$check_name'") | .link | split("/") | .[-3]')
 
    # View logs
    gh run view $run_id --repo DataDog/dd-trace-rb --log > /tmp/check_log.txt
@@ -350,11 +350,12 @@ gh pr list --repo DataDog/dd-trace-rb --author "p-datadog" --state open
 # Check PR status
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 
-# Get check details JSON
-gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state
+# Get check details JSON (including link to extract run ID)
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state,link
 
-# Get workflow runs for commit
-gh api repos/DataDog/dd-trace-rb/commits/<SHA>/check-runs
+# Extract run ID from a specific check's link
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,link | \
+  jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]'
 
 # View run logs
 gh run view <RUN_ID> --repo DataDog/dd-trace-rb --log
