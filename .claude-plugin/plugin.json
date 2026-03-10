@@ -2,6 +2,9 @@
   "name": "spn",
   "version": "0.1.0",
   "description": "PR review for Datadog dd-trace-rb dynamic instrumentation",
-  "author": "Custom Plugin",
+  "author": {
+    "name": "Custom Plugin",
+    "email": "une@narnia"
+  },
   "license": "MIT"
 }
