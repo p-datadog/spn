@@ -1,7 +1,7 @@
 ---
 name: pr-fix-tests
 description: This skill should be used when the user asks to "fix tests", "fix test failures", "fix failing specs", or mentions fixing test CI failures in a pull request.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # PR Fix Tests
@@ -17,6 +17,8 @@ The skill automates the process of:
 4. Analyzing and fixing each test failure
 5. Committing each fix with a descriptive message
 6. Pushing all commits to the PR branch
+7. **Continuously monitoring CI status** (polling every minute)
+8. **Fixing any new or remaining test failures** until all tests pass
 
 ## When This Skill Applies
 
@@ -287,6 +289,138 @@ git log origin/$(git branch --show-current)..HEAD --oneline
 git push origin HEAD
 ```
 
+### Step 7: Continuously Monitor CI and Fix Remaining Failures
+
+**IMPORTANT:** After pushing fixes, continuously monitor CI status and fix any remaining or new test failures.
+
+**Why this is needed:**
+- Initial fixes may not catch all issues
+- CI environment may reveal failures not reproducible locally
+- Some tests may only fail in specific CI configurations
+- Flaky tests may fail intermittently
+- New failures may appear after fixing others
+
+**Monitoring process:**
+
+```bash
+# Wait for CI to start running after push (30 seconds)
+echo "Waiting for CI to start running new checks..."
+sleep 30
+
+# Begin polling loop
+iteration=1
+while true; do
+  echo "=== Monitoring CI Status (Check #$iteration) ==="
+  echo "Time: $(date)"
+
+  # Get current CI status
+  checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion,link,detailsUrl | \
+    jq '[.[] | select(.name | test("test|spec|e2e|integration|build.*test"; "i"))]')
+
+  # Count running checks
+  running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED" or .state == "PENDING")] | length')
+
+  # Count failed test checks
+  failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
+
+  # Count successful test checks
+  passed=$(echo "$checks" | jq '[.[] | select(.conclusion == "SUCCESS")] | length')
+
+  echo "Test checks: $passed passed, $failed failed, $running running"
+
+  # If there are still running checks, wait and continue
+  if [ "$running" -gt 0 ]; then
+    echo "CI still running, waiting 1 minute before next check..."
+    sleep 60
+    iteration=$((iteration + 1))
+    continue
+  fi
+
+  # If there are failed test checks, analyze and fix them
+  if [ "$failed" -gt 0 ]; then
+    echo "Found $failed test failure(s), analyzing..."
+
+    # Get list of failed test checks
+    failed_checks=$(echo "$checks" | jq -r '.[] | select(.conclusion == "FAILURE") | .name')
+
+    echo "Failed checks:"
+    echo "$failed_checks"
+
+    # Analyze and fix each failure (same process as initial fixes)
+    # ... (follow Steps 3-6 again for new failures)
+
+    # After fixing and pushing, restart the monitoring loop
+    echo "Fixes pushed, restarting CI monitoring..."
+    sleep 30
+    iteration=1
+    continue
+  fi
+
+  # All test checks passed!
+  echo "✅ All test checks passed! No more failures to fix."
+  break
+done
+```
+
+**Key behaviors:**
+1. **Poll every 1 minute** - Check CI status at 1-minute intervals
+2. **Wait for running checks** - Don't check for failures while tests are still running
+3. **Fix new failures** - When failures appear, fix them using the same process as initial fixes
+4. **Commit and push** - Each round of fixes gets committed and pushed
+5. **Continue monitoring** - After pushing fixes, wait and check again
+6. **Exit when all pass** - Stop monitoring when all test checks are successful
+
+**Stopping conditions:**
+- ✅ All test checks pass (conclusion == "SUCCESS")
+- ⚠️ Manual intervention needed (if fixes don't resolve failures after 3 rounds)
+- ⚠️ User cancels the monitoring
+
+**Example monitoring output:**
+
+```
+=== Monitoring CI Status (Check #1) ===
+Time: 2024-03-10 10:15:30
+Test checks: 8 passed, 0 failed, 4 running
+CI still running, waiting 1 minute before next check...
+
+=== Monitoring CI Status (Check #2) ===
+Time: 2024-03-10 10:16:30
+Test checks: 10 passed, 2 failed, 0 running
+Found 2 test failure(s), analyzing...
+Failed checks:
+Test (Ruby 3.0)
+Test (Ruby 2.7)
+
+Analyzing Test (Ruby 3.0) failures...
+  - spec/models/user_spec.rb:52 - assertion failure
+
+Fixing spec/models/user_spec.rb...
+✅ Committed: Fix user validation test
+
+Analyzing Test (Ruby 2.7) failures...
+  - Same issue as Ruby 3.0, already fixed
+
+Pushing fixes...
+Fixes pushed, restarting CI monitoring...
+
+=== Monitoring CI Status (Check #1) ===
+Time: 2024-03-10 10:18:00
+Test checks: 0 passed, 0 failed, 12 running
+CI still running, waiting 1 minute before next check...
+
+=== Monitoring CI Status (Check #2) ===
+Time: 2024-03-10 10:19:00
+Test checks: 12 passed, 0 failed, 0 running
+✅ All test checks passed! No more failures to fix.
+```
+
+**Important notes:**
+- Only monitor and fix **test** failures (not lint/static analysis)
+- Each round of fixes should be committed separately
+- If the same test fails multiple times, investigate more deeply
+- If a test cannot be fixed after 3 attempts, report for manual review
+- Always verify fixes locally before pushing when possible
+
 ## Running Tests Locally
 
 Before pushing, verify fixes work:
@@ -365,6 +499,58 @@ When the skill is invoked with a PR number:
      git push origin HEAD
    else
      echo "No test fixes were needed or all fixes failed"
+     exit 0
+   fi
+   ```
+
+6. **Continuously monitor CI and fix remaining failures:**
+   ```bash
+   # Wait for CI to start
+   sleep 30
+
+   # Polling loop
+   iteration=1
+   max_fix_rounds=10  # Safety limit
+   fix_rounds=0
+
+   while [ "$fix_rounds" -lt "$max_fix_rounds" ]; do
+     echo "=== CI Status Check #$iteration ==="
+
+     # Get test check status
+     checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+       jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))]')
+
+     running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED")] | length')
+     failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
+
+     # Wait if still running
+     if [ "$running" -gt 0 ]; then
+       echo "CI running, waiting 1 minute..."
+       sleep 60
+       iteration=$((iteration + 1))
+       continue
+     fi
+
+     # Fix failures if any
+     if [ "$failed" -gt 0 ]; then
+       echo "Found $failed failure(s), fixing..."
+       fix_rounds=$((fix_rounds + 1))
+
+       # Repeat steps 2-5 for new failures
+       # (analyze, fix, commit, push)
+
+       sleep 30  # Wait for CI to start
+       iteration=1
+       continue
+     fi
+
+     # All passed!
+     echo "✅ All tests passing!"
+     break
+   done
+
+   if [ "$fix_rounds" -ge "$max_fix_rounds" ]; then
+     echo "⚠️ Reached maximum fix rounds. Manual review needed."
    fi
    ```
 
@@ -489,14 +675,65 @@ Root cause: Missing await on async function
 ## Running tests locally to verify...
 ✅ All fixed tests passing locally
 
-## Summary
+## Summary - Initial Round
 - Total checks analyzed: 4
 - Non-test jobs skipped: 1
 - Test failures fixed: 3
 - Commits created: 3
 - Commits pushed: 3
 
-✅ All test failures have been fixed and pushed to the PR branch.
+## Monitoring CI for remaining failures...
+Waiting for CI to start running new checks...
+
+=== CI Status Check #1 ===
+Time: 2024-03-10 10:20:00
+Test checks: 0 passed, 0 failed, 12 running
+CI running, waiting 1 minute...
+
+=== CI Status Check #2 ===
+Time: 2024-03-10 10:21:00
+Test checks: 0 passed, 0 failed, 12 running
+CI running, waiting 1 minute...
+
+=== CI Status Check #3 ===
+Time: 2024-03-10 10:22:00
+Test checks: 10 passed, 2 failed, 0 running
+Found 2 failure(s), fixing...
+
+## Analyzing new failures...
+
+### Failure: spec/integration/workflow_spec.rb:89
+Error: undefined method `process_async` for nil:NilClass
+Root cause: Integration test needs additional setup after our changes
+
+## Fixing spec/integration/workflow_spec.rb...
+✅ Committed: Add missing workflow setup in integration test
+
+Pushing fixes...
+
+## Monitoring CI for remaining failures...
+Waiting for CI to start running new checks...
+
+=== CI Status Check #1 ===
+Time: 2024-03-10 10:24:30
+Test checks: 0 passed, 0 failed, 12 running
+CI running, waiting 1 minute...
+
+=== CI Status Check #2 ===
+Time: 2024-03-10 10:25:30
+Test checks: 5 passed, 0 failed, 7 running
+CI running, waiting 1 minute...
+
+=== CI Status Check #3 ===
+Time: 2024-03-10 10:26:30
+Test checks: 12 passed, 0 failed, 0 running
+
+✅ All tests passing! No more failures to fix.
+
+## Final Summary
+- Total fix rounds: 2
+- Total commits created: 4
+- All test checks passing in CI
 ```
 
 ## Edge Cases
@@ -551,6 +788,63 @@ Root cause: Missing await on async function
 - Report: "⚠️ Push failed due to conflicts. PR branch has been updated."
 - Instruct: "Run `git pull --rebase` and push again manually."
 
+### Continuous Monitoring Edge Cases
+
+**Same test fails multiple times:**
+- If a test fails after 2 fix attempts, investigate more deeply
+- Check if the fix is actually addressing the root cause
+- Look for race conditions or environment-specific issues
+- After 3 failed attempts, report for manual review
+
+**CI takes very long to run:**
+- Continue polling at 1-minute intervals
+- Don't increase polling frequency (respect CI resources)
+- Report progress to user every 5 minutes
+
+**New test failures appear after fixing others:**
+- This is expected - some tests may depend on others
+- Fix the new failures using the same process
+- Commit and push each round of fixes separately
+
+**All tests pass locally but fail in CI:**
+- CI environment may differ (Ruby version, dependencies, timezone, etc.)
+- Analyze CI-specific error messages carefully
+- Fix based on CI logs even if tests pass locally
+- Consider adding CI-specific test setup if needed
+
+**CI stuck in "PENDING" state:**
+- Wait up to 10 minutes for CI to start
+- If still pending after 10 minutes, report issue
+- May indicate CI infrastructure problems
+- Suggest user check GitHub Actions status
+
+**Non-test checks fail during monitoring:**
+- Ignore them - only fix test failures
+- Don't restart monitoring for lint/type check failures
+- Report them in final summary but don't attempt to fix
+
+**Maximum fix rounds reached (10 rounds):**
+- Stop monitoring and report to user
+- Show which tests are still failing
+- Suggest manual review: "Some tests may require deeper investigation"
+- List all commits made and fixes attempted
+
+**User cancels monitoring:**
+- Stop polling immediately
+- Report status at time of cancellation
+- Show commits made so far
+- Note which tests were still failing or running
+
+**PR is merged during monitoring:**
+- Detect merge by checking PR status
+- Stop monitoring gracefully
+- Report: "PR was merged during monitoring"
+
+**Branch is deleted during monitoring:**
+- Detect branch deletion
+- Stop monitoring
+- Report: "PR branch was deleted"
+
 ## Required Tools
 
 This skill requires:
@@ -601,6 +895,71 @@ git log origin/$(git branch --show-current)..HEAD --oneline | wc -l
 
 # Push all commits
 git push origin HEAD
+
+# ============================================
+# CI Monitoring Commands
+# ============================================
+
+# Check current CI status with state and conclusion
+gh pr checks <PR_NUMBER> --json name,state,conclusion,link,detailsUrl
+
+# Get test checks only (filter by name pattern)
+gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  jq '[.[] | select(.name | test("test|spec|e2e|integration|build.*test"; "i"))]'
+
+# Count running test checks
+gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
+      [.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED" or .state == "PENDING")] | length'
+
+# Count failed test checks
+gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
+      [.[] | select(.conclusion == "FAILURE")] | length'
+
+# Count passed test checks
+gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
+      [.[] | select(.conclusion == "SUCCESS")] | length'
+
+# List names of failed test checks
+gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  jq -r '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
+         [.[] | select(.conclusion == "FAILURE")] | .[].name'
+
+# Check PR status (to detect if merged or closed)
+gh pr view <PR_NUMBER> --json state,merged | jq -r '.state, .merged'
+
+# Full monitoring loop example
+iteration=1
+while true; do
+  echo "=== Check #$iteration at $(date) ==="
+
+  checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+    jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))]')
+
+  running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED")] | length')
+  failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
+  passed=$(echo "$checks" | jq '[.[] | select(.conclusion == "SUCCESS")] | length')
+
+  echo "Status: $passed passed, $failed failed, $running running"
+
+  if [ "$running" -gt 0 ]; then
+    echo "Waiting 1 minute..."
+    sleep 60
+    iteration=$((iteration + 1))
+    continue
+  fi
+
+  if [ "$failed" -gt 0 ]; then
+    echo "Fixing $failed failure(s)..."
+    # Fix and restart loop
+    break
+  fi
+
+  echo "All tests passing!"
+  break
+done
 ```
 
 ## Best Practices
@@ -608,14 +967,18 @@ git push origin HEAD
 1. **One commit per logical fix** - Group related fixes, separate unrelated ones
 2. **Descriptive commit messages** - Clearly state what test was fixed and why
 3. **Always include test location** - File and line number in commit message
-4. **Verify fixes locally** - Run tests before pushing
+4. **Verify fixes locally** - Run tests before pushing when possible
 5. **Fix root cause, not symptoms** - Don't just change assertions to pass
 6. **Minimal changes** - Don't refactor or add features while fixing tests
 7. **Include Co-Authored-By** - Credit Claude in all commits
 8. **Read failure logs carefully** - Understand before fixing
 9. **Keep related changes together** - Fix test + source code in same commit if related
-10. **Push at the end** - Make all commits first, then push once
-11. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
+10. **Push after each fix round** - Push commits, then monitor CI for new failures
+11. **Monitor continuously** - Poll CI every 1 minute until all tests pass
+12. **Be patient with CI** - Wait for running checks to complete before analyzing failures
+13. **Fix iteratively** - Each round of failures gets its own commits and push
+14. **Set reasonable limits** - Stop after 10 fix rounds and request manual review
+15. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
 
 ## Safety Checks
 
@@ -634,3 +997,8 @@ Before pushing:
 - If a fix seems too complex or risky, report for manual review
 - Always prioritize correctness over speed
 - When in doubt, ask for clarification on expected behavior
+- **Continuous monitoring is essential** - initial fixes may not catch all failures
+- CI environment often reveals issues not seen locally
+- New test failures can appear after fixing others (cascading failures)
+- Be patient - CI runs take time, poll at 1-minute intervals
+- The skill keeps working until all tests pass or manual review is needed
