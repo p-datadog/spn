@@ -49,10 +49,16 @@ gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state,link
 ```
 
+**Important:** State values are **UPPERCASE**:
+- `FAILURE` - Check failed
+- `SUCCESS` - Check passed
+- `PENDING` - Check in progress
+- `SKIPPED` - Check skipped
+
 ### Step 3: Identify Failed Jobs
 
 Look for checks where:
-- `state` = "failure"
+- `state` = "FAILURE"
 
 **Test job detection:**
 Jobs are considered "test jobs" if their name matches these patterns (case-insensitive):
@@ -120,9 +126,9 @@ gh run rerun $run_id --repo DataDog/dd-trace-rb --failed
 checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state)
 
 # Parse to see if only this check failed
-echo "$checks" | jq 'map(select(.state == "failure")) | length'
+echo "$checks" | jq 'map(select(.state == "FAILURE")) | length'
 # If count is 1, check if it's the "all-jobs-are-green" job
-echo "$checks" | jq -r 'map(select(.state == "failure"))[0].name'
+echo "$checks" | jq -r 'map(select(.state == "FAILURE"))[0].name'
 ```
 
 **Immediate restart:**
@@ -149,7 +155,7 @@ When the skill is invoked:
      checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,state,link)
 
      # Find failed checks
-     failed=$(echo "$checks" | jq -r '.[] | select(.state == "failure")')
+     failed=$(echo "$checks" | jq -r '.[] | select(.state == "FAILURE")')
 
      if [ -z "$failed" ]; then
        echo "  ✅ All checks passing"
@@ -157,10 +163,10 @@ When the skill is invoked:
      fi
 
      # Count failed checks
-     failed_count=$(echo "$checks" | jq '[.[] | select(.state == "failure")] | length')
+     failed_count=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE")] | length')
 
      # Skip PRs with >10 failing test jobs (likely code issues, not infrastructure)
-     test_failures=$(echo "$checks" | jq -r '[.[] | select(.state == "failure") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length')
+     test_failures=$(echo "$checks" | jq -r '[.[] | select(.state == "FAILURE") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length')
      if [ "$test_failures" -gt 10 ]; then
        echo "  ⚠️  Skipping: PR has $test_failures failing test jobs (likely code issues)"
        continue
@@ -168,7 +174,7 @@ When the skill is invoked:
 
      # Check for "all-jobs-are-green" special case
      if [ "$failed_count" -eq 1 ]; then
-       failed_name=$(echo "$checks" | jq -r '[.[] | select(.state == "failure")][0].name')
+       failed_name=$(echo "$checks" | jq -r '[.[] | select(.state == "FAILURE")][0].name')
        if [[ "$failed_name" == "all-jobs-are-green" ]]; then
          echo "  🔄 Only 'all-jobs-are-green' failing, restarting immediately"
          # Get run ID from link field and restart
@@ -365,7 +371,33 @@ gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
 
 # Rerun entire workflow
 gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
+
+# Count failures with correct state value (UPPERCASE)
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state | \
+  jq '[.[] | select(.state == "FAILURE")] | length'
+
+# Count test failures using regex
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state | \
+  jq '[.[] | select(.state == "FAILURE") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length'
 ```
+
+## Common jq Pitfalls
+
+**1. State values are UPPERCASE**
+- ✅ Correct: `.state == "FAILURE"`
+- ❌ Wrong: `.state == "failure"`
+
+**2. Match --json fields to jq selectors**
+- ✅ Correct: `--json name,state,link | jq '.[] | {name, state, link}'`
+- ❌ Wrong: `--json name,state | jq '.[] | .link'` (link not requested)
+
+**3. String output vs object output**
+- Use `jq -r` for raw string output (no quotes)
+- Use `jq` for JSON object output
+
+**4. Array selection syntax**
+- ✅ Correct: `jq '[.[] | select(.state == "FAILURE")] | length'`
+- Use brackets `[]` to collect results into an array before counting
 
 ## Testing the Skill
 
