@@ -46,14 +46,13 @@ gh pr list \
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 
 # Get detailed check information with JSON output
-gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,status,conclusion,detailsUrl
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state,link
 ```
 
 ### Step 3: Identify Failed Jobs
 
 Look for checks where:
-- `status` = "completed"
-- `conclusion` = "failure"
+- `state` = "failure"
 
 **Test job detection:**
 Jobs are considered "test jobs" if their name matches these patterns (case-insensitive):
@@ -118,12 +117,12 @@ gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
 **Detection:**
 ```bash
 # Check if only "all-jobs-are-green" is failing
-checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,conclusion)
+checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state)
 
 # Parse to see if only this check failed
-echo "$checks" | jq 'map(select(.conclusion == "failure")) | length'
+echo "$checks" | jq 'map(select(.state == "failure")) | length'
 # If count is 1, check if it's the "all-jobs-are-green" job
-echo "$checks" | jq -r 'map(select(.conclusion == "failure"))[0].name'
+echo "$checks" | jq -r 'map(select(.state == "failure"))[0].name'
 ```
 
 **Immediate restart:**
@@ -147,10 +146,10 @@ When the skill is invoked:
      echo "Checking PR #$pr"
 
      # Get check status
-     checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,status,conclusion,workflowName)
+     checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,state,workflow)
 
      # Find failed checks
-     failed=$(echo "$checks" | jq -r '.[] | select(.conclusion == "failure")')
+     failed=$(echo "$checks" | jq -r '.[] | select(.state == "failure")')
 
      if [ -z "$failed" ]; then
        echo "  ✅ All checks passing"
@@ -158,10 +157,10 @@ When the skill is invoked:
      fi
 
      # Count failed checks
-     failed_count=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure")] | length')
+     failed_count=$(echo "$checks" | jq '[.[] | select(.state == "failure")] | length')
 
      # Skip PRs with >10 failing test jobs (likely code issues, not infrastructure)
-     test_failures=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length')
+     test_failures=$(echo "$checks" | jq -r '[.[] | select(.state == "failure") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length')
      if [ "$test_failures" -gt 10 ]; then
        echo "  ⚠️  Skipping: PR has $test_failures failing test jobs (likely code issues)"
        continue
@@ -169,7 +168,7 @@ When the skill is invoked:
 
      # Check for "all-jobs-are-green" special case
      if [ "$failed_count" -eq 1 ]; then
-       failed_name=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure")][0].name')
+       failed_name=$(echo "$checks" | jq -r '[.[] | select(.state == "failure")][0].name')
        if [[ "$failed_name" == "all-jobs-are-green" ]]; then
          echo "  🔄 Only 'all-jobs-are-green' failing, restarting immediately"
          # Get run ID and restart
@@ -352,7 +351,7 @@ gh pr list --repo DataDog/dd-trace-rb --author "p-datadog" --state open
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 
 # Get check details JSON
-gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,status,conclusion
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state
 
 # Get workflow runs for commit
 gh api repos/DataDog/dd-trace-rb/commits/<SHA>/check-runs
