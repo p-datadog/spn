@@ -13,9 +13,10 @@ This skill checks all PRs by the `p-datadog` user in the `DataDog/dd-trace-rb` r
 The skill automates the process of:
 1. Finding all open PRs by the `p-datadog` user
 2. Checking CI job status for each PR
-3. Investigating failed jobs
-4. Restarting jobs that failed due to infrastructure issues
-5. Special handling for the "all-jobs-are-green" job
+3. Skipping PRs with >10 failing test jobs (likely code issues)
+4. Investigating failed jobs
+5. Restarting jobs that failed due to infrastructure issues
+6. Special handling for the "all-jobs-are-green" job
 
 ## When This Skill Applies
 
@@ -53,6 +54,16 @@ gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,status,conclusio
 Look for checks where:
 - `status` = "completed"
 - `conclusion` = "failure"
+
+**Test job detection:**
+Jobs are considered "test jobs" if their name matches these patterns (case-insensitive):
+- Contains "test"
+- Contains "build" followed by "test"
+- Contains "Ruby" followed by "test"
+- Examples: "Ruby 3.0 / build & test", "Test (macos-15, 3.1)", "test-asan"
+
+**PR filtering:**
+If a PR has >10 failing test jobs, skip it entirely. This indicates widespread code issues rather than infrastructure problems, and automated CI restarts won't help.
 
 ### Step 4: Investigate Failure Reasons
 
@@ -146,8 +157,17 @@ When the skill is invoked:
        continue
      fi
 
-     # Check for "all-jobs-are-green" special case
+     # Count failed checks
      failed_count=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure")] | length')
+
+     # Skip PRs with >10 failing test jobs (likely code issues, not infrastructure)
+     test_failures=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure") | select(.name | test("test|build.*test|Ruby.*test"; "i"))] | length')
+     if [ "$test_failures" -gt 10 ]; then
+       echo "  ⚠️  Skipping: PR has $test_failures failing test jobs (likely code issues)"
+       continue
+     fi
+
+     # Check for "all-jobs-are-green" special case
      if [ "$failed_count" -eq 1 ]; then
        failed_name=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure")][0].name')
        if [[ "$failed_name" == "all-jobs-are-green" ]]; then
@@ -242,10 +262,11 @@ Use these patterns to detect infrastructure failures in logs:
 # CI Job Check Report - p-datadog PRs
 
 ## Summary
-- Total PRs checked: 15
+- Total PRs checked: 16
+- PRs skipped (>10 test failures): 1
 - PRs with failures: 4
 - Jobs restarted: 6
-- Jobs skipped: 2
+- Jobs skipped (code issues): 3
 
 ## PR #4567: Add dynamic instrumentation support
 ✅ All checks passing
@@ -276,12 +297,24 @@ Use these patterns to detect infrastructure failures in logs:
      Reason: Only failing job (all other checks green)
      Run ID: 12345680
 
+## PR #4571: Major refactoring
+❌ Failed checks: 15
+
+  ⚠️  SKIPPED: PR has 12 failing test jobs
+     This PR likely has code issues requiring developer attention.
+     Automated CI restart will not help.
+
 ## Actions Taken
 ✅ Restarted 6 infrastructure-related failures
-⚠️  Skipped 2 code-related failures (require developer attention)
+⚠️  Skipped 3 code-related failures (require developer attention)
 ```
 
 ## Edge Cases
+
+**PRs with >10 failing test jobs:**
+- Skip investigation and restart
+- Report as likely code issues requiring developer attention
+- Prevents wasting time on PRs with widespread test failures
 
 **Multiple failures in same PR:**
 - Investigate each independently
