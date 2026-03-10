@@ -2,6 +2,13 @@
 
 A collection of Claude Code skills for working with Datadog's dd-trace-rb repository.
 
+## Coding Guidelines
+
+See `CLAUDE.md` for coding standards and guidelines when working with dd-trace-rb, including:
+- Trailing comma requirements for di/ and symbol_database/ directories
+- Code style conventions
+- Best practices
+
 ## Skills
 
 ### 1. `di-pr-review` - Review Dynamic Instrumentation PRs
