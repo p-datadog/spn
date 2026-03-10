@@ -32,8 +32,9 @@ Use this skill when:
 1. Make the requested change at the commented location
 2. Search the entire diff for similar code patterns
 3. Fix ALL similar occurrences in the changed files
-4. Respond **inline** to the comment with a list of all locations where the fix was applied
-5. **DO NOT** resolve the comment (let the reviewer verify and resolve)
+4. **Commit the changes with a descriptive message**
+5. Respond **inline** to the comment with a list of all locations where the fix was applied
+6. **DO NOT** resolve the comment (let the reviewer verify and resolve)
 
 **Example response format:**
 ```
@@ -114,6 +115,9 @@ Follow these steps when responding to PR comments:
 ### 1. Fetch PR and Comments
 
 ```bash
+# Checkout the PR branch
+gh pr checkout <PR_NUMBER>
+
 # View PR details and comments
 gh pr view <PR_NUMBER>
 
@@ -145,7 +149,22 @@ gh diff | grep -A 5 -B 5 "pattern"
 # 4. Fix all similar occurrences
 # Use Edit tool for each location
 
-# 5. Respond inline to the comment with all locations fixed
+# 5. Commit the changes with a descriptive message
+git add <changed-files>
+git commit -m "$(cat <<'EOF'
+Fix <brief description of what was fixed>
+
+Address review comment: <summary of the review feedback>
+
+- Fixed in <file>:<line>
+- Fixed in <file>:<line> (similar pattern)
+- Added test coverage in <test_file>:<line>
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+
+# 6. Respond inline to the comment with all locations fixed
 gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
   -f body="Fixed in the following locations: ..."
 ```
@@ -172,8 +191,98 @@ bundle exec rspec
 bundle exec rubocop
 
 # Review the diff
-git diff
+git diff origin/$(git branch --show-current)..HEAD
 ```
+
+### 6. Push All Commits
+
+**After responding to all comments, if any changes were made:**
+
+```bash
+# Check if any commits were made
+commits_made=$(git log origin/$(git branch --show-current)..HEAD --oneline | wc -l)
+
+# Push all commits to the PR branch
+if [ "$commits_made" -gt 0 ]; then
+  echo "Pushing $commits_made commit(s) to PR branch..."
+  git push origin HEAD
+else
+  echo "No changes were made, nothing to push"
+fi
+```
+
+**IMPORTANT:** Only push after all comments have been addressed and all changes committed. This ensures all fixes are pushed together.
+
+## Commit Message Format
+
+Each change addressing a review comment should be committed separately with a descriptive message:
+
+```
+Fix <brief description of what was fixed>
+
+Address review comment: <summary of the review feedback>
+
+- Fixed in <file>:<line> (original location)
+- Fixed in <file>:<line> (similar pattern)
+- Fixed in <file>:<line> (similar pattern)
+- Added test coverage in <test_file>:<line>
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+### Commit Message Examples
+
+**Example 1: Adding error boundaries**
+```
+Fix missing error boundaries in TracePoint callbacks
+
+Address review comment: Add error boundaries to prevent exceptions
+from propagating to customer code.
+
+- Fixed in lib/datadog/di/probe_manager.rb:67-75
+- Fixed in lib/datadog/di/probe_manager.rb:145-153
+- Fixed in lib/datadog/di/line_probe.rb:89-97
+- Added test coverage in spec/datadog/di/probe_manager_spec.rb:345
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**Example 2: Adding telemetry**
+```
+Add missing telemetry to error handlers
+
+Address review comment: All rescue blocks must report errors via
+telemetry for observability.
+
+- Fixed in lib/datadog/di/snapshot_serializer.rb:89-92
+- Fixed in lib/datadog/di/config_loader.rb:134-137
+- Added test coverage in spec/datadog/di/snapshot_serializer_spec.rb:256
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**Example 3: Removing sleep from tests**
+```
+Replace sleep with deterministic synchronization
+
+Address review comment: Remove non-deterministic sleep calls from
+tests and use queue-based synchronization.
+
+- Fixed in spec/datadog/di/async_spec.rb:78
+- Fixed in spec/datadog/di/worker_spec.rb:134
+- Fixed in spec/datadog/di/background_processor_spec.rb:201
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+### Commit Guidelines
+
+- **One commit per review comment** - Group all fixes for one comment into one commit
+- **Descriptive title** - Clearly state what was fixed (under 72 characters)
+- **Reference the review** - Include "Address review comment" in the body
+- **List all locations** - Show everywhere the fix was applied
+- **Include test changes** - Note any test coverage added
+- **Co-Authored-By line** - Always credit Claude
 
 ## Finding Similar Code Patterns
 
@@ -257,10 +366,12 @@ Fixed in the following locations:
 - Search both implementation and test files
 - Add test coverage for any behavior changes
 - Run tests after making changes
+- **Commit each change separately with descriptive message**
 - Provide specific file and line references
 - Be thorough in searching for patterns
 - Be respectful in all responses
 - Acknowledge good catches by reviewers
+- **Push all commits after responding to all comments**
 
 ### DON'T:
 - Resolve comments (let reviewers do it)
@@ -270,6 +381,8 @@ Fixed in the following locations:
 - Make assumptions about what the reviewer meant
 - Skip running tests after changes
 - Forget to update test coverage
+- **Push before addressing all comments**
+- **Mix unrelated fixes in one commit**
 
 ## Example Workflow
 
@@ -311,7 +424,27 @@ grep -rn "TracePoint.new" lib/datadog/di/
 bundle exec rspec
 ```
 
-7. **Respond to comment:**
+7. **Commit the changes:**
+```bash
+git add lib/datadog/di/probe_manager.rb lib/datadog/di/line_probe.rb spec/datadog/di/*_spec.rb
+git commit -m "$(cat <<'EOF'
+Fix missing error boundaries in TracePoint callbacks
+
+Address review comment: Add error boundaries to prevent exceptions
+from propagating to customer code.
+
+- Fixed in lib/datadog/di/probe_manager.rb:67-75 (original location)
+- Fixed in lib/datadog/di/probe_manager.rb:145-153 (similar pattern)
+- Fixed in lib/datadog/di/line_probe.rb:89-97 (similar pattern)
+- Added test coverage in spec/datadog/di/probe_manager_spec.rb:345
+- Added test coverage in spec/datadog/di/line_probe_spec.rb:234
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+8. **Respond to comment:**
 ```markdown
 Fixed in the following locations:
 
@@ -360,7 +493,9 @@ A successful response includes:
 - ✅ Similar issues found and fixed proactively
 - ✅ All questions answered clearly
 - ✅ Disagreements explained respectfully with evidence
+- ✅ **Each change committed separately with descriptive message**
 - ✅ Tests passing after changes
 - ✅ Test coverage maintained or improved
 - ✅ Detailed response showing all locations fixed
 - ✅ Comments NOT resolved (left for reviewer)
+- ✅ **All commits pushed to PR branch after all comments addressed**
