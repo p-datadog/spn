@@ -497,6 +497,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] Fork/fiber edge cases handled
 - [ ] Documentation updated
 - [ ] CHANGELOG updated if required
+- [ ] Trailing commas used in di/ and symbol_database/ directories (per CLAUDE.md)
 
 ## Review Process
 

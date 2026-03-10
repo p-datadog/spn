@@ -359,6 +359,38 @@ Fixed in the following locations:
 - ✅ Coverage maintained at 100%
 ```
 
+## Code Style Requirements
+
+When making changes to code, follow these guidelines from `CLAUDE.md`:
+
+### Trailing Commas
+
+**MANDATORY** in these directories:
+- `lib/datadog/di/` and all subdirectories
+- `lib/datadog/symbol_database/` and all subdirectories
+
+**RECOMMENDED** everywhere else when adding new code.
+
+Always use trailing commas in multi-line arrays, hashes, and method calls:
+
+```ruby
+# ✅ Correct
+config = {
+  timeout: 30,
+  retries: 3,
+  enabled: true,
+}
+
+# ❌ Wrong (in di/ and symbol_database/)
+config = {
+  timeout: 30,
+  retries: 3,
+  enabled: true
+}
+```
+
+See `CLAUDE.md` for complete guidelines.
+
 ## Important Guidelines
 
 ### DO:
@@ -372,6 +404,7 @@ Fixed in the following locations:
 - Be respectful in all responses
 - Acknowledge good catches by reviewers
 - **Push all commits after responding to all comments**
+- **Use trailing commas in di/ and symbol_database/ directories**
 
 ### DON'T:
 - Resolve comments (let reviewers do it)
