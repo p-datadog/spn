@@ -200,6 +200,8 @@ This is blocking approval.
 
 **Requirement:** Dynamic instrumentation must NEVER propagate exceptions to customer applications.
 
+**Exception:** If `settings.dynamic_instrumentation.internal.propagate_all_exceptions` is set to true, exceptions may escape DI code. This is an internal setting used for debugging and testing purposes only.
+
 **Principle:** Customer code must execute identically whether instrumentation is enabled or disabled. Any instrumentation failure must be contained, logged, and reported—never raised to customer code.
 
 **Review actions:**
