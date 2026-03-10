@@ -6,12 +6,12 @@ version: 0.1.0
 
 # Check and Restart CI Jobs (crcj)
 
-This skill checks all PRs with the `p-datadog` label in the `DataDog/dd-trace-rb` repository and restarts failed CI jobs that appear to be infrastructure-related failures.
+This skill checks all PRs by the `p-datadog` user in the `DataDog/dd-trace-rb` repository and restarts failed CI jobs that appear to be infrastructure-related failures.
 
 ## Overview
 
 The skill automates the process of:
-1. Finding all open PRs with the `p-datadog` label
+1. Finding all open PRs by the `p-datadog` user
 2. Checking CI job status for each PR
 3. Investigating failed jobs
 4. Restarting jobs that failed due to infrastructure issues
@@ -23,17 +23,17 @@ Use this skill when:
 - User asks to "check CI for p-datadog PRs"
 - User wants to "restart failed CI jobs"
 - User mentions "fix infrastructure failures in CI"
-- Periodic maintenance of p-datadog labeled PRs
+- Periodic maintenance of p-datadog user's PRs
 
 ## Workflow
 
 ### Step 1: Find All p-datadog PRs
 
 ```bash
-# List all open PRs with p-datadog label
+# List all open PRs by p-datadog user
 gh pr list \
   --repo DataDog/dd-trace-rb \
-  --label "p-datadog" \
+  --author "p-datadog" \
   --state open \
   --json number,title,url,headRefName
 ```
@@ -127,7 +127,7 @@ When the skill is invoked:
 
 1. **Fetch all p-datadog PRs:**
    ```bash
-   prs=$(gh pr list --repo DataDog/dd-trace-rb --label "p-datadog" --state open --json number,title,headRefOid)
+   prs=$(gh pr list --repo DataDog/dd-trace-rb --author "p-datadog" --state open --json number,title,headRefOid)
    ```
 
 2. **For each PR:**
@@ -312,8 +312,8 @@ This skill requires:
 ## Commands Reference
 
 ```bash
-# List PRs with label
-gh pr list --repo DataDog/dd-trace-rb --label "p-datadog" --state open
+# List PRs by author
+gh pr list --repo DataDog/dd-trace-rb --author "p-datadog" --state open
 
 # Check PR status
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
