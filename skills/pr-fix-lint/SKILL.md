@@ -553,6 +553,7 @@ git push origin HEAD
 6. **Include Co-Authored-By** - Credit Claude in all commits
 7. **Skip test failures** - Only fix non-test issues
 8. **Report clearly** - Show what was fixed and what was skipped
+9. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
 
 ## Safety Checks
 

@@ -615,6 +615,7 @@ git push origin HEAD
 8. **Read failure logs carefully** - Understand before fixing
 9. **Keep related changes together** - Fix test + source code in same commit if related
 10. **Push at the end** - Make all commits first, then push once
+11. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
 
 ## Safety Checks
 
