@@ -467,14 +467,17 @@ Before pushing, verify fixes work:
 
 **Ruby (RSpec):**
 ```bash
-# Run specific test file
+# Run all core tests (dd-trace-rb primary method)
+bundle exec rake spec:main
+
+# Run specific test file (direct RSpec also works)
 bundle exec rspec spec/path/to/test_spec.rb
 
 # Run specific test line
 bundle exec rspec spec/path/to/test_spec.rb:45
 
-# Run all tests
-bundle exec rspec
+# Note: dd-trace-rb uses rake tasks as the primary test entry point
+# CI runs: bundle exec rake spec:main, spec:redis, spec:profiling, etc.
 ```
 
 **JavaScript (Jest):**
@@ -833,7 +836,7 @@ Test checks: 12 passed, 0 failed, 0 running
 **Fixes don't resolve CI failure:**
 - Commit what was fixed anyway
 - Report: "⚠️ Fixes applied but some tests may still fail. Manual review needed."
-- Suggest running full test suite: "Run `bundle exec rspec` to verify locally"
+- Suggest running full test suite: "Run `bundle exec rake spec:main` to verify locally"
 
 **Protected branch (can't push):**
 - Report error with branch protection info
@@ -929,8 +932,9 @@ run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
 gh run view $run_id --log
 
 # Run tests locally
-bundle exec rspec spec/path/to/test_spec.rb:45    # Ruby - specific line
-bundle exec rspec spec/path/to/test_spec.rb       # Ruby - entire file
+bundle exec rake spec:main                        # Ruby - all core tests (dd-trace-rb primary)
+bundle exec rspec spec/path/to/test_spec.rb:45    # Ruby - specific line (also works)
+bundle exec rspec spec/path/to/test_spec.rb       # Ruby - entire file (also works)
 npm test path/to/test.test.js                     # JavaScript
 pytest tests/path/to/test_file.py::test_name      # Python
 
