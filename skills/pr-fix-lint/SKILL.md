@@ -1,7 +1,7 @@
 ---
 name: pr-fix-lint
-description: This skill should be used when the user asks to "fix lint", "fix CI", "fix static analysis", "fix typing errors", "fix type check", "fix steep", or mentions fixing non-test CI failures in a pull request.
-version: 0.2.0
+description: This skill should be used when the user asks to "fix lint", "fix CI", "fix static analysis", "fix typing errors", "fix type check", "fix steep", "fix standard", or mentions fixing non-test CI failures in a pull request.
+version: 0.3.0
 ---
 
 # PR Fix Lint
@@ -23,7 +23,7 @@ The skill automates the process of:
 Use this skill when:
 - User asks to "fix lint failures in PR"
 - User wants to "fix CI failures" (excluding test failures)
-- User mentions "fix RuboCop", "fix static analysis", "fix typing errors", "fix type check", "fix steep"
+- User mentions "fix StandardRB", "fix standard", "fix static analysis", "fix typing errors", "fix type check", "fix steep"
 - PR has non-test CI failures that can be automatically fixed
 - User wants to clean up code quality issues before review
 
@@ -32,10 +32,10 @@ Use this skill when:
 This skill ONLY addresses **non-test failures**:
 
 ### ✅ Addressed (Non-Test Failures)
-- **Linting:** RuboCop, ESLint, Pylint, etc.
+- **Linting:** StandardRB, ESLint, Pylint, etc.
 - **Static Analysis:** Brakeman, Sorbet, mypy, etc.
 - **Type Checking:** TypeScript, Flow, Sorbet, Steep (Ruby), mypy (Python)
-- **Code Formatting:** Prettier, Black, gofmt, rubyfmt
+- **Code Formatting:** Prettier, Black, gofmt, standardrb
 - **Security Scanning:** CodeQL, bundler-audit (auto-fixable issues)
 - **Style Checks:** Code style violations
 
@@ -71,7 +71,7 @@ gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl
 Look for failed checks matching these patterns:
 
 **Linting:**
-- "RuboCop", "rubocop", "lint"
+- "StandardRB", "standard", "lint"
 - "ESLint", "eslint"
 - "Pylint", "flake8", "ruff"
 - "golangci-lint", "go lint"
@@ -120,7 +120,7 @@ details_url=$(gh pr checks <PR_NUMBER> --json name,detailsUrl | \
 ```
 
 Parse the logs to understand:
-- What tool is failing (RuboCop, ESLint, mypy, etc.)
+- What tool is failing (StandardRB, ESLint, mypy, etc.)
 - What files have issues
 - What specific violations are reported
 - Whether the tool has an auto-fix option
@@ -136,20 +136,20 @@ Each fix type should be:
 
 #### Fix Linting Issues
 
-**RuboCop (Ruby):**
+**StandardRB (Ruby):**
 ```bash
-# Auto-fix RuboCop violations
-bundle exec rubocop -A
+# Auto-fix StandardRB violations
+bundle exec rake standard:fix
 
-# Or for specific files
-bundle exec rubocop -A path/to/file.rb
+# Or run check first to see issues
+bundle exec rake standard
 
 # Commit the fix
 git add -A
 git commit -m "$(cat <<'EOF'
-Fix RuboCop violations
+Fix StandardRB violations
 
-Auto-correct code style issues reported by RuboCop CI check.
+Auto-correct code style issues reported by StandardRB CI check.
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 EOF
@@ -545,7 +545,7 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
 Examples:
-- `Fix RuboCop style violations`
+- `Fix StandardRB style violations`
 - `Fix ESLint errors in components`
 - `Fix TypeScript type checking errors`
 - `Fix code formatting with Prettier`
@@ -569,7 +569,7 @@ When the skill is invoked with a PR number:
    ```
 
 3. **For each non-test failure:**
-   - Identify the tool (RuboCop, ESLint, etc.)
+   - Identify the tool (StandardRB, ESLint, etc.)
    - Get the failure logs
    - Determine if auto-fixable
    - Apply the appropriate fix command
@@ -598,7 +598,7 @@ Is check failing?
   └─ Yes → Does name contain "test"/"spec"/"e2e"?
       ├─ Yes → Skip (test failure, not in scope)
       └─ No → What tool is it?
-          ├─ RuboCop → Run `rubocop -A` → Commit
+          ├─ StandardRB → Run `bundle exec rake standard:fix` → Commit
           ├─ ESLint → Run `eslint --fix` → Commit
           ├─ Prettier → Run `prettier --write` → Commit
           ├─ Black → Run `black .` → Commit
@@ -627,15 +627,15 @@ Base: main
 
 ## Checking CI Status...
 Found 4 failed checks:
-  ❌ RuboCop
+  ❌ StandardRB
   ❌ ESLint
   ✅ Test (Ruby 3.0) - Skipped (test job)
   ✅ Test (Ruby 2.7) - Skipped (test job)
 
-## Fixing RuboCop violations...
-Running: bundle exec rubocop -A
+## Fixing StandardRB violations...
+Running: bundle exec rake standard:fix
 Fixed 23 violations in 5 files
-✅ Committed: Fix RuboCop style violations
+✅ Committed: Fix StandardRB style violations
 
 ## Fixing ESLint errors...
 Running: npx eslint --fix .
@@ -656,10 +656,10 @@ Fixed 12 violations in 3 files
 
 **Multiple failures of same type:**
 - Fix all at once, make one commit
-- Example: RuboCop failing in multiple jobs → one `rubocop -A` fixes all
+- Example: StandardRB failing in multiple jobs → one `bundle exec rake standard:fix` fixes all
 
 **Tool not available in environment:**
-- Report error: "Cannot fix RuboCop: bundle exec rubocop not found"
+- Report error: "Cannot fix StandardRB: bundle exec rake standard not found"
 - Skip this fix, continue with others
 
 **No auto-fix available:**
@@ -691,7 +691,7 @@ This skill requires:
 - GitHub CLI (`gh`) authenticated
 - Git configured
 - Language-specific tools as needed:
-  - Ruby: `bundle`, `rubocop`
+  - Ruby: `bundle`, `standard` (via rake tasks)
   - JavaScript/TypeScript: `npm`/`yarn`, `eslint`, `prettier`, `tsc`
   - Python: `pip`, `black`, `ruff`, `mypy`
   - Go: `go`, `golangci-lint`, `goimports`
@@ -708,7 +708,8 @@ gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
       map(select(.name | test("test|spec|e2e|integration"; "i") | not))'
 
 # Common fix commands
-bundle exec rubocop -A              # Ruby linting
+bundle exec rake standard:fix       # Ruby linting (auto-fix)
+bundle exec rake standard           # Ruby linting (check only)
 npx eslint --fix .                  # JavaScript linting
 npx prettier --write .              # Code formatting
 black .                             # Python formatting
@@ -736,7 +737,7 @@ git push origin HEAD
 
 ## Best Practices
 
-1. **One commit per tool/fix type** - Don't mix RuboCop and ESLint fixes in one commit
+1. **One commit per tool/fix type** - Don't mix StandardRB and ESLint fixes in one commit
 2. **Descriptive commit messages** - Clearly state what was fixed
 3. **Auto-fix first** - Try automated fixes before manual intervention
 4. **Verify fixes** - Run the tool again to confirm issues are resolved
@@ -757,10 +758,10 @@ Before pushing:
 
 ## Notes
 
-- Always use auto-fix options when available (`-A`, `--fix`, `--write`)
+- Always use auto-fix options when available (`standard:fix`, `--fix`, `--write`)
 - For manual fixes, be conservative - only fix what's clearly wrong
 - If a fix is ambiguous or complex, skip it and report for manual review
 - Some tools (like TypeScript) may require multiple iterations
-- Be aware of tool configuration files (`.rubocop.yml`, `.eslintrc`, etc.)
+- Be aware of tool configuration files (`.standard.yml`, `.customcops.yml`, `.eslintrc`, etc.)
 - Respect the project's existing code style and conventions
 - **Steep type checker**: Most errors are false positives due to limitations in type narrowing and cross-scope tracking. When in doubt, add `steep:ignore` directives rather than changing working code. Only fix the code if the error reveals a genuine bug (actual nil dereference, wrong type passed, etc.)
