@@ -94,10 +94,11 @@ When a test fails inconsistently or shows signs of being flaky:
 
 ## Workflow
 
-### Step 1: Read Repository Guidelines
+### Step 1: Read Repository Guidelines and Review Requirements
 
-**CRITICAL:** Before making any fixes, read the repository's CLAUDE.md file to understand coding standards and guidelines.
+**CRITICAL:** Before making any fixes, read both the repository's coding guidelines and the review requirements.
 
+**Read CLAUDE.md:**
 ```bash
 # Read CLAUDE.md if it exists
 if [ -f CLAUDE.md ]; then
@@ -111,6 +112,22 @@ Key guidelines to look for:
 - Testing requirements (100% coverage for DI code)
 - Error handling patterns
 - Any project-specific rules
+
+**Read di-pr-review skill requirements:**
+
+Read `skills/di-pr-review/SKILL.md` to understand the quality standards that must be met:
+
+**CRITICAL Requirements (must always follow):**
+- ✅ **NO skipped tests** - Don't skip tests, fix them to pass or delete them
+- ✅ **NO sleep in tests** - Use deterministic synchronization (Queue, ConditionVariable)
+- ✅ **100% code coverage** - All new/changed code must have full test coverage
+- ✅ **NO exception propagation** - Add error boundaries where needed
+- ✅ **Proper error handling** - All rescue blocks need DEBUG/WARN logging + telemetry
+- ✅ **NO hardcoded /tmp paths** - Use Dir.mktmpdir or Tempfile.create
+- ✅ **Trailing commas** - Required in di/ and symbol_database/ directories
+
+**Why read review requirements?**
+When fixing tests, you must ensure your fixes comply with ALL review standards. A test fix that introduces sleep, skips tests, or lacks coverage will fail review even if it makes tests pass.
 
 ### Step 2: Fetch PR and Check CI Status
 
@@ -1058,6 +1075,93 @@ while true; do
   break
 done
 ```
+
+## Applying Review Requirements to Test Fixes
+
+**CRITICAL:** Every test fix must comply with ALL review requirements from di-pr-review skill.
+
+### When Fixing Test Failures
+
+**Avoid introducing new violations:**
+- ❌ Don't add sleep to make tests pass
+- ❌ Don't skip tests that are hard to fix
+- ❌ Don't use hardcoded /tmp paths in fixes
+- ❌ Don't leave code uncovered by tests
+
+**Ensure compliance:**
+- ✅ Use Queue, ConditionVariable, or mock time instead of sleep
+- ✅ Fix skipped tests to pass or delete them
+- ✅ Use Dir.mktmpdir or Tempfile.create for temp files
+- ✅ Add test coverage for any new code added
+- ✅ Use trailing commas in di/ and symbol_database/
+
+### When Fixing Source Code (to make tests pass)
+
+If fixing source code to make tests pass:
+
+**Add error boundaries if needed:**
+```ruby
+# If adding code that could propagate exceptions
+TracePoint.new(:call) do |tp|
+  begin
+    probe.execute(tp)  # Could raise
+  rescue => e
+    Datadog.logger.debug("Probe execution failed: #{e}")
+    Datadog.telemetry.error('probe_execution_failed', error: e)
+  end
+end
+```
+
+**Add proper error handling:**
+```ruby
+# All rescues need logging + telemetry
+begin
+  process_snapshot
+rescue => e
+  Datadog.logger.debug("Snapshot processing failed: #{e}")
+  Datadog.telemetry.error('snapshot_processing_failed', error: e)
+end
+```
+
+**Use trailing commas in di/ and symbol_database/:**
+```ruby
+# ✅ Correct
+config = {
+  timeout: 30,
+  retries: 3,
+  enabled: true,
+}
+
+# ❌ Wrong in di/ directories
+config = {
+  timeout: 30,
+  retries: 3,
+  enabled: true
+}
+```
+
+**No hardcoded /tmp paths:**
+```ruby
+# ✅ Correct
+Dir.mktmpdir('di_test') do |dir|
+  file = File.join(dir, 'data.json')
+end
+
+# ❌ Wrong
+file = '/tmp/di_test/data.json'
+```
+
+### Verification Checklist
+
+Before committing each fix, verify:
+- [ ] Test fix doesn't introduce sleep
+- [ ] Test fix doesn't skip tests
+- [ ] All code has test coverage
+- [ ] No hardcoded /tmp paths added
+- [ ] Trailing commas used in di/ and symbol_database/
+- [ ] Error boundaries added where needed
+- [ ] Rescue blocks have logging + telemetry
+- [ ] Tests pass locally
 
 ## Best Practices
 

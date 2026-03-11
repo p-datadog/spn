@@ -1103,57 +1103,125 @@ Provide review feedback in this structure:
 When the user says things like:
 - "Fix the sleep in tests"
 - "Fix the skipped test"
+- "Fix the RuboCop errors"
+- "Fix the Steep type errors"
 - "Add the missing error boundary"
-- "Fix the hardcoded /tmp path"
-- "Add the missing telemetry"
+- "Fix all the issues"
 
-**You must:**
+**Determine which fix skill to use:**
+
+**Use `/pr-fix-tests` for:**
+- Test failures (skipped tests, failing specs, test errors)
+- Sleep in tests
+- Test-related issues
+
+**Use `/pr-fix-lint` for:**
+- Linting errors (RuboCop, ESLint, StandardRB)
+- Type checking errors (Steep, Sorbet, TypeScript)
+- Formatting issues (Prettier, Black)
+- Static analysis issues
+
+**Fix manually (in review skill) for:**
+- Issues that don't fit the fix skills (missing error boundaries, missing telemetry, hardcoded /tmp paths)
+- Mixed issues that span multiple categories
+- Issues requiring review context
+
+**Process:**
+1. **Identify issue type** - Test, lint, or manual fix
+2. **Delegate to appropriate fix skill** - Use `/pr-fix-tests` or `/pr-fix-lint` with PR number
+3. **Or fix manually** - For issues not covered by fix skills
+
+**Example delegations:**
+- "Fix the sleep in tests" → `/pr-fix-tests <PR_NUMBER>`
+- "Fix the RuboCop violations" → `/pr-fix-lint <PR_NUMBER>`
+- "Add the missing error boundary" → Fix manually (doesn't fit either skill)
+- "Fix all the test failures" → `/pr-fix-tests <PR_NUMBER>`
+- "Fix all the lint issues" → `/pr-fix-lint <PR_NUMBER>`
+
+**When fixing manually (not using fix skills):**
 1. **Actually fix the code** - Make the necessary changes using Edit tool
 2. **Follow review requirements** - Apply all quality standards from this review skill
 3. **Add test coverage** - Ensure fixes have full test coverage (100% for DI code)
 4. **Commit the fix** - Create a commit with descriptive message
 5. **Verify the fix** - Confirm the issue is resolved
 
-**DO NOT:**
-- Just explain what needs to be fixed
-- Provide a code snippet without applying it
-- Say "you should do X" or "recommend changing Y"
-- Wait for further instructions
+### Example Follow-Up Flows
 
-### Example Follow-Up Flow
+**Example 1: Test issue → Delegate to pr-fix-tests**
 
-**Review identifies issue:**
+**Review identifies:**
 ```
 ❌ CRITICAL: Sleep in tests
-
 File: spec/datadog/di/worker_spec.rb:78
-Line: sleep 0.5
-
-This makes tests flaky. Replace with deterministic synchronization.
 ```
 
 **User says:** "Fix the sleep"
 
 **Correct response:**
-1. **Read the test file** - Understand the test context
-2. **Identify the problematic sleep** - Understand what it's waiting for
-3. **Replace sleep** - Use proper synchronization (Queue, ConditionVariable, etc.)
-4. **Apply review requirements** - Ensure proper formatting, coverage
-5. **Verify test still passes** - The fix shouldn't break the test
-6. **Commit the change:**
-   ```bash
-   git commit -m "Replace sleep with queue-based synchronization in worker_spec.rb
+```
+I'll use the pr-fix-tests skill to fix this test issue.
+/pr-fix-tests <PR_NUMBER>
+```
 
-   Address review feedback: Remove non-deterministic sleep and use
-   queue.pop with timeout for deterministic test synchronization.
+The pr-fix-tests skill will:
+- Read CLAUDE.md for guidelines
+- Fix the sleep with proper synchronization
+- Ensure 100% test coverage
+- Apply all review requirements
+- Monitor CI until tests pass
 
-   Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
-   ```
+---
 
-**Incorrect response:**
-- "You should replace the sleep with a Queue..." ❌
-- "I recommend using ConditionVariable..." ❌
-- "Here's how you can fix it: [code snippet]" ❌
+**Example 2: Lint issue → Delegate to pr-fix-lint**
+
+**Review identifies:**
+```
+❌ Repository Guidelines: RuboCop violations
+Files with violations: lib/datadog/di/probe_manager.rb
+```
+
+**User says:** "Fix the RuboCop issues"
+
+**Correct response:**
+```
+I'll use the pr-fix-lint skill to fix the linting issues.
+/pr-fix-lint <PR_NUMBER>
+```
+
+The pr-fix-lint skill will:
+- Read CLAUDE.md for guidelines
+- Run rubocop -A to auto-fix
+- Apply trailing commas per CLAUDE.md
+- Commit and push fixes
+
+---
+
+**Example 3: Manual fix → Fix directly**
+
+**Review identifies:**
+```
+❌ CRITICAL: Missing error boundary
+File: lib/datadog/di/probe_manager.rb:67
+TracePoint callback has no error handling
+```
+
+**User says:** "Add the error boundary"
+
+**Correct response:**
+This requires a manual fix (not covered by fix skills):
+1. Read the file
+2. Add rescue block with logging and telemetry
+3. Add test coverage for error boundary
+4. Commit the change
+
+**Why manual?** Adding error boundaries with proper logging and telemetry requires context-specific code that the fix skills don't handle.
+
+---
+
+**Incorrect responses:**
+- "You should replace the sleep with a Queue..." ❌ (explaining instead of fixing)
+- "Here's the code to add: [snippet]" ❌ (providing code without applying it)
+- Using wrong fix skill ❌ (e.g., pr-fix-lint for test issues)
 
 ### Fixing Multiple Issues
 
