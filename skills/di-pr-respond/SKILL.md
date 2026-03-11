@@ -57,10 +57,147 @@ All TracePoint callbacks now have proper error boundaries with logging and telem
 ```
 
 **How to find similar code:**
-- Use Grep to search for similar patterns in changed files
-- Look for same method calls, similar control flow, or related functionality
-- Check both implementation code and test files
-- Consider edge cases the reviewer might not have pointed out
+
+**CRITICAL:** This is NOT optional - it's a mandatory step. When a reviewer asks for a fix, they expect consistency everywhere in the PR, not just the one line they commented on.
+
+**1. Extract the pattern from the comment:**
+- "stop saying X" → search for "X" (including in comments and docs)
+- "add error boundary" → search for `TracePoint.new`, callback patterns
+- "use constant" → search for magic numbers or hardcoded values
+- "rename X to Y" → search for "X" everywhere
+- "remove sleep" → search for `sleep` in test files
+
+**2. Search the PR diff first:**
+```bash
+# Get full diff and search for pattern
+gh pr diff <PR_NUMBER> | grep -i "<pattern>" > /tmp/matches.txt
+
+# Review all matches
+cat /tmp/matches.txt
+```
+
+**3. Search changed files directly:**
+```bash
+# Get list of changed files
+gh pr diff <PR_NUMBER> --name-only
+
+# Search in those files
+grep -rn "<pattern>" <changed_files>
+```
+
+**4. Search for BOTH code and semantic mentions:**
+- Don't just search for code (method calls, checks, conditions)
+- **ALSO search for comments, docs, and messages** that mention the pattern
+- Example: "requires DI" appears in comments, not just code
+- Example: "sleep" appears in both code and code comments explaining waits
+
+**5. Try multiple search patterns:**
+```bash
+# Try variations to ensure completeness
+gh pr diff <PR> | grep -i "requires DI"           # Exact phrase
+gh pr diff <PR> | grep -i "symbol.*database.*DI"  # Semantic match
+gh pr diff <PR> | grep -i "symdb.*di"             # Abbreviation
+```
+
+**6. Verify completeness after fixing:**
+```bash
+# After fixing, verify pattern is gone
+gh pr diff <PR_NUMBER> | grep -i "<pattern>"
+# Should return nothing (or only irrelevant matches)
+```
+
+**Examples of common mistakes:**
+- ❌ Searching only for code: `unless settings.dynamic_instrumentation.enabled`
+- ✅ Searching for semantics: "requires DI", "depends on DI", "needs DI"
+- ❌ Fixing one file only
+- ✅ Searching entire PR diff and fixing all files
+- ❌ Case-sensitive search missing variations
+- ✅ Using `-i` flag for case-insensitive search
+
+**Examples of Proper Pattern Searching:**
+
+These examples demonstrate the complete workflow for finding and fixing all similar occurrences:
+
+**Example 1: "stop saying symdb requires di"**
+
+❌ **Wrong approach:**
+- Only fix the code check: `unless settings.dynamic_instrumentation.enabled`
+- Miss comments saying "requires DI"
+
+✅ **Right approach:**
+```bash
+# Search the PR diff for the semantic pattern
+gh pr diff 5431 | grep -i "requires DI"
+
+# Results found:
+# - lib/datadog/symbol_database/component.rb:26 (doc comment)
+# - lib/datadog/symbol_database/component.rb:41 (code check)
+# - lib/datadog/core/configuration/components.rb:173 (comment)
+# - lib/datadog/core/configuration/components.rb:241 (comment)
+# - lib/datadog/core/remote/client/capabilities.rb:43 (comment)
+
+# Fix ALL 5 occurrences (1 code + 4 comments)
+# Verify: gh pr diff 5431 | grep -i "requires DI"  # Should return empty
+```
+
+**Example 2: "add error boundary to TracePoint callbacks"**
+
+❌ **Wrong approach:**
+- Only fix the commented callback
+- Miss similar callbacks elsewhere
+
+✅ **Right approach:**
+```bash
+# Search for all TracePoint usage in changed files
+gh pr diff <PR> | grep -B 2 -A 5 "TracePoint.new"
+
+# Also search in the affected directories
+grep -rn "TracePoint.new" lib/datadog/di/
+
+# Fix ALL callbacks found (often 5-10 locations)
+```
+
+**Example 3: "use CONSTANT instead of magic number"**
+
+❌ **Wrong approach:**
+- Only replace the one number in the commented location
+
+✅ **Right approach:**
+```bash
+# Search for the magic number (e.g., 60) in the PR diff
+gh pr diff <PR> | grep -n "\b60\b"
+
+# Search in context to find similar uses
+grep -rn "timeout.*60\|60.*second" lib/datadog/
+
+# Replace ALL occurrences with the constant
+```
+
+**Example 4: "remove sleep from tests"**
+
+❌ **Wrong approach:**
+- Only remove the one sleep
+
+✅ **Right approach:**
+```bash
+# Search for all sleep calls in test files
+gh pr diff <PR> | grep -n "sleep"
+
+# Also check for Thread.pass and other timing-based waits
+gh pr diff <PR> | grep -n "sleep\|Thread.pass\|Time.now"
+
+# Replace ALL with deterministic synchronization (queues, waits)
+```
+
+**Key Principle:**
+
+When a reviewer says "fix X", they mean:
+1. Fix the code that implements X
+2. Fix the comments/docs that describe X
+3. Fix the tests that verify X
+4. Fix ALL similar occurrences in the PR diff
+
+**This is the mandatory workflow - not optional.**
 
 ### Rule 2: Disagreements - Explain Reasoning
 
@@ -153,11 +290,18 @@ For each change request:
 # Use Edit tool for precise changes
 
 # 3. Search for similar patterns in the diff
-git diff origin/main...HEAD | grep -A 5 -B 5 "pattern"
-# Or use: gh pr diff <PR_NUMBER> | grep -A 5 -B 5 "pattern"
+# CRITICAL: Search for BOTH code and semantic mentions (comments, docs)
+gh pr diff <PR_NUMBER> | grep -i "pattern" > /tmp/matches.txt
+cat /tmp/matches.txt  # Review all matches
 
-# 4. Fix all similar occurrences
-# Use Edit tool for each location
+# Try variations to ensure completeness
+gh pr diff <PR_NUMBER> | grep -i "semantic_pattern"
+
+# Verify you found everything
+gh pr diff <PR_NUMBER> | grep -i "pattern" | wc -l  # Count occurrences
+
+# 4. Fix all similar occurrences found
+# Use Edit tool for each location (code + comments + docs)
 
 # 5. Commit the changes with a descriptive message
 git add <changed-files>
@@ -174,7 +318,12 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 EOF
 )"
 
-# 6. Respond inline to the comment with all locations fixed
+# 6. Verify completeness - pattern should be gone
+gh pr diff <PR_NUMBER> | grep -i "pattern"
+# Should return nothing (or only irrelevant matches)
+# If it still finds matches, go back to step 4 and fix them
+
+# 7. Respond inline to the comment with all locations fixed
 gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
   -f body="Fixed in the following locations: ..."
 ```
@@ -298,6 +447,8 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 
 When fixing a change request, search for these similar patterns:
 
+**ALWAYS start by searching the PR diff, not the entire codebase.** This ensures you fix all occurrences within the scope of the PR.
+
 ### Error Boundaries
 If fixing missing error boundary, search for:
 - All TracePoint callbacks
@@ -306,6 +457,12 @@ If fixing missing error boundary, search for:
 - All instrumentation entry points
 
 ```bash
+# FIRST: Search the PR diff
+gh pr diff <PR_NUMBER> | grep -B 2 -A 5 "TracePoint.new"
+gh pr diff <PR_NUMBER> | grep "def.*super"
+gh pr diff <PR_NUMBER> | grep "probe.execute"
+
+# THEN: Search affected directories if needed
 grep -rn "TracePoint.new" lib/datadog/di/
 grep -rn "def.*super" lib/datadog/di/
 grep -rn "probe.execute" lib/datadog/di/
@@ -317,6 +474,10 @@ If adding telemetry, search for:
 - Similar error conditions
 
 ```bash
+# FIRST: Search the PR diff
+gh pr diff <PR_NUMBER> | grep -B 2 -A 5 "rescue"
+
+# THEN: Search specific changed files
 grep -rn "rescue\s*=>" lib/datadog/di/changed_file.rb
 ```
 
@@ -327,6 +488,11 @@ If fixing a test pattern, search for:
 - Related functionality tests
 
 ```bash
+# FIRST: Search the PR diff
+gh pr diff <PR_NUMBER> | grep "describe.*similar_pattern"
+gh pr diff <PR_NUMBER> | grep "it.*similar_behavior"
+
+# THEN: Search test directories if needed
 grep -rn "describe.*similar_pattern" spec/
 grep -rn "it.*similar_behavior" spec/
 ```
@@ -338,8 +504,30 @@ If removing sleep, search for:
 - Time-based waits
 
 ```bash
+# FIRST: Search the PR diff (catches all sleep in changed files)
+gh pr diff <PR_NUMBER> | grep -n "sleep\|Thread.pass"
+
+# Verify completeness
+gh pr diff <PR_NUMBER> | grep -n "sleep"  # Should be empty after fixes
+
+# THEN: Search entire spec directory only if pattern spans beyond PR
 grep -rn "sleep\|Thread.pass" spec/
 ```
+
+### Semantic Comments and Documentation
+
+**CRITICAL:** Don't forget to search for semantic mentions in comments and docs:
+
+```bash
+# Example: If fixing "symdb requires DI", search for the phrase
+gh pr diff <PR_NUMBER> | grep -i "requires DI"
+gh pr diff <PR_NUMBER> | grep -i "symbol.*database.*DI"
+
+# Example: If renaming a concept, search for the old name
+gh pr diff <PR_NUMBER> | grep -i "old_name"
+```
+
+**Remember:** Comments and documentation often describe patterns that code implements. Fix both!
 
 ## Response Template
 
