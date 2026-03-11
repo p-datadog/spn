@@ -144,7 +144,8 @@ For each change request:
 # Use Edit tool for precise changes
 
 # 3. Search for similar patterns in the diff
-gh diff | grep -A 5 -B 5 "pattern"
+git diff origin/main...HEAD | grep -A 5 -B 5 "pattern"
+# Or use: gh pr diff <PR_NUMBER> | grep -A 5 -B 5 "pattern"
 
 # 4. Fix all similar occurrences
 # Use Edit tool for each location
