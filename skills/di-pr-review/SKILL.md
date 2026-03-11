@@ -1443,10 +1443,15 @@ To review a dd-trace-rb dynamic instrumentation PR:
 
 1. **Fetch the PR**: Use `gh pr view <number>` or `gh pr checkout <number>`
 2. **Read changed files**: Focus on new instrumentation code
-3. **Check for line probe test file modifications**:
+3. **Review existing comments** (if any):
+   - Ignore outdated comments (marked `outdated: true` in API, collapsed in UI)
+   - Only consider current comments on the latest code
+   - Outdated comments were already addressed by subsequent code changes
+   - See "Understanding Outdated Comments" section below
+4. **Check for line probe test file modifications**:
    - Identify if any line probe test files were modified
    - Verify line number changes are safe (additions at end) or tests are updated
-4. **Run critical checks**:
+5. **Run critical checks**:
    - Search for skipped tests
    - Search for sleep in tests
    - Search for hardcoded /tmp paths
@@ -1454,15 +1459,100 @@ To review a dd-trace-rb dynamic instrumentation PR:
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
-5. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, RuboCop
-6. **Run tests**: `bundle exec rspec` with coverage
-7. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
+6. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, RuboCop
+7. **Run tests**: `bundle exec rspec` with coverage
+8. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
+
+## Understanding Outdated Comments
+
+**What are outdated comments?**
+
+Outdated comments are GitHub PR review comments that were made on previous versions of code that has since been changed or replaced.
+
+**How comments become outdated:**
+1. Reviewer comments on line 145: "Add error boundary here"
+2. You push new commits that modify lines around line 145
+3. GitHub marks that comment as `outdated: true` in the API
+4. The comment is collapsed in the UI under "Show outdated" sections
+5. The line numbers referenced may no longer exist or contain different code
+
+**Why ignore outdated comments during review:**
+- They reference code that no longer exists in the current PR
+- They've usually been addressed (that's why the code changed)
+- The reviewer hasn't re-commented on the new code
+- Reviewing outdated comments wastes time on superseded context
+- If the concern still applies, the reviewer will re-post it on current code
+
+**How to identify them:**
+
+**In the GitHub UI:**
+- Collapsed under "Show outdated" expandable sections
+- Grayed out or visually de-emphasized
+- Show old commit SHA references
+
+**Via GitHub API:**
+```bash
+# Get only current (non-outdated) comments
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == false)]'
+
+# See which comments are outdated
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == true) | {path, line, body: .body[0:100]}]'
+```
+
+**When to address an "outdated" comment:**
+- **Never, unless explicitly asked** - They've been superseded by code changes
+- Only if reviewer re-posts it on current code: "This still applies"
+- Only if reviewer explicitly references the outdated comment: "My comment from line 145 still applies to the new implementation"
+
+**Example scenario:**
+
+**Initial code (line 145):**
+```ruby
+def process_probe
+  probe.execute  # No error handling
+end
+```
+
+**Reviewer comments:** "Add error boundary here" (on line 145)
+
+**You push new commit that refactors the entire method:**
+```ruby
+def process_probe
+  begin
+    probe.execute
+  rescue => e
+    log_error(e)
+  end
+end
+```
+
+**Result:**
+- Original comment is now marked `outdated: true`
+- The concern was addressed by your refactor
+- No need to respond to the outdated comment
+- Reviewer sees the new code and either approves or leaves new comments
+
+**Summary:** When reviewing a PR, only consider current comments on the latest code. Outdated comments are historical context that's been superseded.
 
 ## Commands to Run
 
 ```bash
 # Fetch PR
 gh pr checkout <PR_NUMBER>
+
+# View current (non-outdated) review comments
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == false) | {path, line, body}]'
+
+# Count current vs outdated comments
+echo "Current comments:"
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == false)] | length'
+echo "Outdated comments (ignore these):"
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == true)] | length'
 
 # Check for skipped tests
 grep -rn "^\s*skip\|^\s*pending\|^\s*xit\|^\s*xdescribe" spec/ test/

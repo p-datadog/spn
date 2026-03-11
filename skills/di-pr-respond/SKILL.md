@@ -267,16 +267,47 @@ gh pr checkout <PR_NUMBER>
 # View PR details and comments
 gh pr view <PR_NUMBER>
 
-# Get review comments as JSON
-gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments
+# Get review comments as JSON (only non-outdated)
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == false)]'
 ```
+
+**CRITICAL: Ignore outdated comments**
+
+**What are outdated comments?**
+- Comments made on previous versions of code that has since been changed
+- GitHub marks comments as `outdated: true` when the code they reference is modified
+- They're collapsed in the UI under "Show outdated" sections
+
+**Why ignore them?**
+- They've usually already been addressed (that's why the code changed)
+- The reviewer hasn't re-commented on new code, so no action needed
+- You'd be responding to code that no longer exists
+- Wastes time on historical context
+
+**How to identify them:**
+```bash
+# Filter out outdated comments using jq
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+  jq '[.[] | select(.outdated == false)]' > /tmp/current_comments.json
+
+# Only process non-outdated comments
+cat /tmp/current_comments.json
+```
+
+**When to address an "outdated" comment:**
+- Only if the reviewer explicitly re-posts it on current code
+- Only if they say "this still applies to the new code"
+- Never respond to outdated comments unless explicitly asked
 
 ### 2. Categorize Each Comment
 
-For each comment, determine:
+For each **non-outdated** comment, determine:
 - Is this a change request?
 - Is this a question?
 - Do I disagree with this?
+
+**Skip any comments with `outdated: true` - they've been superseded by code changes.**
 
 ### 3. Process Change Requests
 
