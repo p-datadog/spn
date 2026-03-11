@@ -17,6 +17,7 @@ The skill automates the process of:
 4. Investigating failed jobs
 5. Restarting jobs that failed due to infrastructure issues
 6. Special handling for the "All Required Checks Passed" job
+7. Printing a final summary table showing all PRs, their titles, and actions taken
 
 ## When This Skill Applies
 
@@ -109,6 +110,24 @@ gh api repos/DataDog/dd-trace-rb/commits/<COMMIT_SHA>/check-runs \
 gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb --failed
 ```
 
+### Step 7: Print Final Summary
+
+After processing all PRs, print a summary table showing:
+- PR number
+- PR title
+- Actions taken (All passing / Skipped / Restarted N jobs / No action)
+
+```bash
+# Print summary at the end
+echo ""
+echo "========================================="
+echo "SUMMARY"
+echo "========================================="
+printf "%-8s | %-50s | %s\n" "PR #" "Title" "Actions"
+echo "---------|-----------------------------------------------------|------------------"
+# For each PR, print: PR number, title, and action summary
+```
+
 ## Special Case: "All Required Checks Passed" Job
 
 **Job name:** "All Required Checks Passed" (or similar - verify exact name from actual PR)
@@ -139,33 +158,48 @@ gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
 
 When the skill is invoked:
 
-1. **Fetch all p-datadog PRs:**
+1. **Initialize summary tracking:**
+   ```bash
+   # Create a temporary file to track PR summaries
+   summary_file=$(mktemp)
+   echo "PR_NUM|PR_TITLE|ACTION" > "$summary_file"
+   ```
+
+2. **Fetch all p-datadog PRs:**
    ```bash
    prs=$(gh pr list --repo DataDog/dd-trace-rb --label "p-datadog" --state open --json number,title,headRefOid)
    ```
 
-2. **For each PR:**
+3. **For each PR:**
    ```bash
-   for pr in $(echo "$prs" | jq -r '.[].number'); do
-     echo "Checking PR #$pr"
+   echo "$prs" | jq -c '.[]' | while read pr_data; do
+     pr_num=$(echo "$pr_data" | jq -r '.number')
+     pr_title=$(echo "$pr_data" | jq -r '.title')
+
+     echo "Checking PR #$pr_num: $pr_title"
 
      # Check if PR has "no-restart" label - if so, skip it
-     labels=$(gh pr view $pr --repo DataDog/dd-trace-rb --json labels --jq '.labels[].name')
+     labels=$(gh pr view $pr_num --repo DataDog/dd-trace-rb --json labels --jq '.labels[].name')
      if echo "$labels" | grep -q "no-restart"; then
-       echo "  ⏭️  Skipping PR #$pr (has 'no-restart' label)"
+       echo "  ⏭️  Skipping PR #$pr_num (has 'no-restart' label)"
+       echo "$pr_num|$pr_title|Skipped (no-restart label)" >> "$summary_file"
        continue
      fi
 
      # Get check status
-     checks=$(gh pr checks $pr --repo DataDog/dd-trace-rb --json name,status,conclusion,workflowName)
+     checks=$(gh pr checks $pr_num --repo DataDog/dd-trace-rb --json name,status,conclusion,workflowName)
 
      # Find failed checks
      failed=$(echo "$checks" | jq -r '.[] | select(.conclusion == "failure")')
 
      if [ -z "$failed" ]; then
        echo "  ✅ All checks passing"
+       echo "$pr_num|$pr_title|All checks passing" >> "$summary_file"
        continue
      fi
+
+     # Track restart count for this PR
+     restart_count=0
 
      # Check for "All Required Checks Passed" special case
      failed_count=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure")] | length')
@@ -175,6 +209,7 @@ When the skill is invoked:
          echo "  🔄 Only 'All Required Checks Passed' failing, restarting immediately"
          # Get run ID and restart
          # gh run rerun <RUN_ID> --repo DataDog/dd-trace-rb
+         restart_count=$((restart_count + 1))
        fi
      fi
 
@@ -182,11 +217,19 @@ When the skill is invoked:
      echo "$failed" | jq -r '.name' | while read check_name; do
        echo "  ❌ Failed: $check_name"
        # Investigate and restart if infrastructure-related
+       # If restarted: restart_count=$((restart_count + 1))
      done
+
+     # Record summary for this PR
+     if [ "$restart_count" -gt 0 ]; then
+       echo "$pr_num|$pr_title|Restarted $restart_count job(s)" >> "$summary_file"
+     else
+       echo "$pr_num|$pr_title|Failed (no restarts)" >> "$summary_file"
+     fi
    done
    ```
 
-3. **For each failed check, get logs and analyze:**
+4. **For each failed check, get logs and analyze:**
    ```bash
    # Get workflow run for the PR
    runs=$(gh api repos/DataDog/dd-trace-rb/commits/$commit_sha/check-runs --jq '.check_runs[] | select(.name == "'$check_name'") | {id: .id, run_id: .run_id}')
@@ -205,11 +248,29 @@ When the skill is invoked:
    fi
    ```
 
-4. **Report summary:**
-   - Total PRs checked
-   - PRs with failures
-   - Jobs restarted (with reasons)
-   - Jobs NOT restarted (with reasons)
+5. **Print final summary:**
+   ```bash
+   echo ""
+   echo "========================================="
+   echo "SUMMARY"
+   echo "========================================="
+   printf "%-8s | %-60s | %s\n" "PR #" "Title" "Actions"
+   echo "---------|--------------------------------------------------------------|------------------------"
+
+   # Read and format summary from tracking file
+   tail -n +2 "$summary_file" | while IFS='|' read pr_num pr_title action; do
+     # Truncate title if too long
+     if [ ${#pr_title} -gt 60 ]; then
+       pr_title="${pr_title:0:57}..."
+     fi
+     printf "%-8s | %-60s | %s\n" "$pr_num" "$pr_title" "$action"
+   done
+
+   echo "========================================="
+
+   # Cleanup
+   rm -f "$summary_file"
+   ```
 
 ## Infrastructure Failure Detection Heuristics
 
@@ -300,6 +361,18 @@ Use these patterns to detect infrastructure failures in logs:
 ## Actions Taken
 ✅ Restarted 6 infrastructure-related failures
 ⚠️  Skipped 2 code-related failures (require developer attention)
+
+=========================================
+SUMMARY
+=========================================
+PR #     | Title                                                        | Actions
+---------|--------------------------------------------------------------|------------------------
+4567     | Add dynamic instrumentation support                         | All checks passing
+4568     | Fix probe serialization                                      | Restarted 2 job(s)
+4569     | Update telemetry reporting                                   | Failed (no restarts)
+4570     | Refactor probe manager                                       | Restarted 1 job(s)
+4571     | Add new telemetry endpoint for dynamic instrumentation       | Skipped (no-restart label)
+=========================================
 ```
 
 ## Edge Cases
