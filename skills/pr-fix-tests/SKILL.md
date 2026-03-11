@@ -50,6 +50,46 @@ This skill ONLY addresses **test failures**:
 
 **Exception:** If fixing a test requires type changes, that's acceptable. But don't go out of your way to fix unrelated type/lint issues.
 
+## CRITICAL: Handling Flaky and Intermittent Test Failures
+
+**⚠️ Pay close attention to test flakiness and intermittent failures.**
+
+When a test fails inconsistently or shows signs of being flaky:
+
+**DO:**
+- **Investigate the root cause** - Why does it fail sometimes?
+- **Fix the underlying issue** - Race conditions, timing, cleanup, etc.
+- **Look for patterns** - Does it fail in specific environments or conditions?
+- **Analyze the failure** - Read error messages carefully for clues
+
+**Common root causes:**
+- **Race conditions** - Async operations not properly awaited
+- **Improper cleanup** - Previous test state leaking into current test
+- **Timing dependencies** - Relying on arbitrary sleeps or delays
+- **External dependencies** - Network, database, or filesystem state
+- **Resource leaks** - Unclosed connections, file handles, etc.
+- **Non-deterministic data** - Random values, timestamps without mocking
+
+**DON'T:**
+- Don't add `sleep()` calls to "fix" timing issues
+- Don't skip or comment out flaky tests
+- Don't add retry logic to mask flakiness
+- Don't ignore intermittent failures hoping they'll go away
+- Don't apply band-aid workarounds that hide the problem
+
+**Proper fixes:**
+- Use proper synchronization (Queue, ConditionVariable, callbacks)
+- Add explicit cleanup (after blocks, ensure clauses)
+- Mock time/random values for determinism
+- Use test transaction rollback for database cleanup
+- Wait for explicit conditions, not arbitrary timeouts
+
+**If you can't determine the root cause:**
+- Document what you've tried
+- Provide analysis of the failure pattern
+- Request manual review with your findings
+- Don't merge without understanding the issue
+
 ## Workflow
 
 ### Step 1: Fetch PR and Check CI Status
@@ -297,7 +337,7 @@ git push origin HEAD
 - Initial fixes may not catch all issues
 - CI environment may reveal failures not reproducible locally
 - Some tests may only fail in specific CI configurations
-- Flaky tests may fail intermittently
+- Flaky tests may fail intermittently (investigate root cause, don't mask with workarounds)
 - New failures may appear after fixing others
 
 **Monitoring process:**
@@ -749,9 +789,25 @@ Test checks: 12 passed, 0 failed, 0 running
 - Example: "Fix user.process to handle nil input"
 
 **Flaky test:**
-- If test passes sometimes, investigate root cause
-- Add proper synchronization or cleanup
-- Don't just skip the test
+- **ALWAYS investigate root cause** - Why does it fail inconsistently?
+- Common causes: race conditions, improper cleanup, timing dependencies, leaked state
+- Add proper synchronization (Queue, ConditionVariable, explicit waits)
+- Fix cleanup issues (after blocks, ensure clauses, transaction rollback)
+- Mock non-deterministic values (time, random, external data)
+- **Don't apply workarounds:** No sleep(), no retries, no skipping
+- If root cause is unclear, document investigation and request manual review
+- Example root cause fixes:
+  ```ruby
+  # BAD - Masks the problem
+  sleep 0.5
+  expect(result).to be_ready
+
+  # GOOD - Fixes race condition
+  queue = Queue.new
+  async_operation { |r| queue.push(r) }
+  result = Timeout.timeout(2) { queue.pop }
+  expect(result).to be_ready
+  ```
 
 **Test failure in generated code:**
 - Regenerate the code if possible (e.g., `rails g`)
@@ -993,7 +1049,8 @@ Before pushing:
 
 - Test failures often indicate bugs in the source code, not just test issues
 - Some test failures require understanding business logic
-- Flaky tests should be fixed properly, not just ignored
+- **Flaky tests require root cause investigation** - Never mask with sleep(), retries, or skipping
+- **Intermittent failures are real failures** - Investigate why they happen inconsistently
 - If a fix seems too complex or risky, report for manual review
 - Always prioritize correctness over speed
 - When in doubt, ask for clarification on expected behavior
