@@ -24,7 +24,84 @@ Reviews PRs against 6 critical DI requirements for the dd-trace-rb repository.
 /di-pr-review https://github.com/DataDog/dd-trace-rb/pull/5434
 ```
 
-### 2. `crcj` - Check and Restart CI Jobs
+**What it checks:**
+- NO skipped tests
+- NO sleep in tests
+- 100% code coverage
+- Repository guidelines compliance (CLAUDE.md)
+- NO exception propagation (error boundaries)
+- Proper error handling (logging + telemetry)
+- Line probe test files (line number verification)
+- Trailing commas in di/ and symbol_database/
+
+### 2. `di-pr-respond` - Respond to PR Review Comments
+Systematically processes PR review comments, makes requested changes, finds and fixes similar issues throughout the codebase, and responds to each comment.
+
+**Usage:**
+```bash
+/di-pr-respond <PR_NUMBER>
+```
+
+**What it does:**
+- Fetches all review comments from a PR
+- For change requests: Fixes the issue AND finds similar patterns to fix proactively
+- For questions: Provides clear answers with code references
+- For disagreements: Explains reasoning respectfully with evidence
+- Commits each change separately with descriptive messages
+- Responds inline to each comment (never resolves them)
+- Pushes all commits after addressing all comments
+
+### 3. `pr-fix-lint` - Fix Non-Test CI Failures
+Automatically fixes lint, static analysis, type checking, and formatting failures in a PR.
+
+**Usage:**
+```bash
+/pr-fix-lint <PR_NUMBER>
+```
+
+**What it fixes:**
+- **Linting:** RuboCop, ESLint, Pylint, etc.
+- **Type Checking:** TypeScript, Steep (Ruby), Sorbet, mypy
+- **Formatting:** Prettier, Black, gofmt
+- **Static Analysis:** Brakeman, CodeQL
+- **Steep-specific rules:**
+  - Fix genuine code issues revealed by type errors
+  - Silence unclear errors with steep:ignore directives
+  - NEVER change code only to satisfy steep
+  - Known false positives: type narrowing, cross-scope assignments, multi-type containers
+
+**Process:**
+- Identifies non-test CI failures
+- Applies auto-fixes where available
+- Commits each fix type separately
+- Pushes all commits at the end
+
+### 4. `pr-fix-tests` - Fix Test Failures (with Continuous Monitoring)
+Automatically fixes test failures in a PR and continuously monitors CI until all tests pass.
+
+**Usage:**
+```bash
+/pr-fix-tests <PR_NUMBER>
+```
+
+**What it does:**
+- Identifies test CI failures (RSpec, Jest, pytest, etc.)
+- Analyzes failure logs to determine root cause
+- Fixes each test failure (updates tests or source code)
+- Commits each fix separately with descriptive messages
+- Pushes commits to PR branch
+- **Continuously monitors CI status** (polls every 1 minute)
+- Fixes any new or remaining test failures that appear in CI
+- Keeps working until all tests pass or 10 fix rounds reached
+
+**Test failure patterns:**
+- Outdated expectations
+- Missing setup
+- Async timing issues
+- Changed method signatures
+- Code bugs
+
+### 5. `crcj` - Check and Restart CI Jobs
 Automatically checks CI status for PRs by the p-datadog user and restarts failed jobs that are infrastructure-related.
 
 **Usage:**
@@ -61,6 +138,9 @@ If you're already in this directory, the skills are automatically available.
 3. **Use the skills:**
    ```bash
    /di-pr-review <PR_URL>
+   /di-pr-respond <PR_NUMBER>
+   /pr-fix-lint <PR_NUMBER>
+   /pr-fix-tests <PR_NUMBER>
    /crcj
    ```
 
@@ -74,6 +154,9 @@ cd /path/to/your/project
 
 # Use the skill with full plugin name
 /spn:di-pr-review <PR_URL>
+/spn:di-pr-respond <PR_NUMBER>
+/spn:pr-fix-lint <PR_NUMBER>
+/spn:pr-fix-tests <PR_NUMBER>
 /spn:crcj
 ```
 
@@ -137,6 +220,29 @@ version: 0.1.0
 
 Detailed instructions and documentation for Claude to follow when executing this skill...
 ```
+
+## Quick Reference
+
+**Which skill should I use?**
+
+| Task | Skill | Command |
+|------|-------|---------|
+| Review a DI PR for quality standards | `di-pr-review` | `/di-pr-review <PR_URL>` |
+| Respond to PR review comments | `di-pr-respond` | `/di-pr-respond <PR_NUMBER>` |
+| Fix lint/type check/formatting failures | `pr-fix-lint` | `/pr-fix-lint <PR_NUMBER>` |
+| Fix test failures (with CI monitoring) | `pr-fix-tests` | `/pr-fix-tests <PR_NUMBER>` |
+| Restart failed CI jobs for p-datadog PRs | `crcj` | `/crcj` |
+
+**Typical workflow:**
+
+1. Create PR with new code
+2. Wait for CI to run
+3. Use `/pr-fix-lint <PR_NUMBER>` to fix any linting/type checking issues
+4. Use `/pr-fix-tests <PR_NUMBER>` to fix any test failures (monitors CI until all pass)
+5. Use `/di-pr-review <PR_URL>` to verify PR meets DI quality standards
+6. Wait for human review
+7. Use `/di-pr-respond <PR_NUMBER>` to address review comments
+8. Use `/crcj` to restart any infrastructure-related CI failures
 
 ## Repository
 
