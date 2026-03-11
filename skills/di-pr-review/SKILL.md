@@ -715,6 +715,238 @@ When line probe test files are modified incorrectly:
 **Alternative:** If possible, add new methods at the end of the file to avoid shifting existing line numbers.
 ```
 
+## Hardcoded /tmp Paths
+
+**Overview:** Code must not use hardcoded paths in `/tmp`. These paths can lead to file collisions, security issues, and test flakiness in parallel execution environments.
+
+**Critical Requirement:** Any code that needs temporary files or directories must use `tmpdir` or similar functions to create isolated temporary locations.
+
+### Why Hardcoded /tmp Paths Are Problematic
+
+**Security issues:**
+- Multiple processes writing to the same path creates race conditions
+- Predictable paths are security vulnerabilities (symlink attacks, file overwrites)
+- File permissions may not be set correctly
+
+**Reliability issues:**
+- Tests running in parallel can collide on the same path
+- Previous test runs may leave files that affect subsequent tests
+- CI environments may not have write access to specific /tmp paths
+- Different systems may have different /tmp structures
+
+**Examples:**
+
+```ruby
+# ❌ BAD - Hardcoded /tmp path
+File.write('/tmp/snapshot.json', data)
+FileUtils.mkdir_p('/tmp/di_probes')
+file = File.open('/tmp/probe_cache', 'w')
+
+# ✅ GOOD - Use tmpdir
+require 'tmpdir'
+Dir.mktmpdir('di_snapshot') do |dir|
+  File.write(File.join(dir, 'snapshot.json'), data)
+end
+
+# ✅ GOOD - Tempfile for single files
+require 'tempfile'
+Tempfile.create('probe_cache') do |file|
+  file.write(data)
+  file.flush
+  # Use file
+end
+```
+
+### How to Check for Hardcoded /tmp Paths
+
+**Search for the patterns:**
+
+```bash
+# Find hardcoded /tmp paths in Ruby code
+grep -rn "'/tmp/" lib/ spec/
+grep -rn '"/tmp/' lib/ spec/
+
+# Find File operations with /tmp
+grep -rn "File\.\(write\|read\|open\).*['\"]\/tmp\/" lib/ spec/
+
+# Find FileUtils operations with /tmp
+grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
+
+# Find Dir operations with /tmp
+grep -rn "Dir\..*['\"]\/tmp\/" lib/ spec/
+```
+
+**Common patterns to flag:**
+- `'/tmp/anything'` or `"/tmp/anything"`
+- `File.write('/tmp/...')`
+- `File.open('/tmp/...')`
+- `FileUtils.mkdir_p('/tmp/...')`
+- `Dir.chdir('/tmp/...')`
+- Any string literal containing `/tmp/`
+
+### Correct Patterns
+
+**For temporary directories:**
+
+```ruby
+require 'tmpdir'
+
+# Automatically cleaned up when block exits
+Dir.mktmpdir('di_probes') do |dir|
+  probe_file = File.join(dir, 'probe.json')
+  File.write(probe_file, data)
+  # Use probe_file
+end
+
+# Or without block (manual cleanup)
+dir = Dir.mktmpdir('di_probes')
+begin
+  # Use dir
+ensure
+  FileUtils.remove_entry(dir)
+end
+```
+
+**For temporary files:**
+
+```ruby
+require 'tempfile'
+
+# Single file, automatically cleaned up
+Tempfile.create('snapshot') do |file|
+  file.write(data)
+  file.flush
+  file.rewind
+  # Use file
+end
+
+# Multiple files in same directory
+Dir.mktmpdir('di_test') do |dir|
+  file1 = File.join(dir, 'config.json')
+  file2 = File.join(dir, 'output.json')
+  File.write(file1, config)
+  File.write(file2, output)
+end
+```
+
+**In tests:**
+
+```ruby
+# RSpec - use around hook for temp directory
+around do |example|
+  Dir.mktmpdir('di_test') do |dir|
+    @tmpdir = dir
+    example.run
+  end
+end
+
+it 'processes snapshot' do
+  snapshot_file = File.join(@tmpdir, 'snapshot.json')
+  File.write(snapshot_file, data)
+  # Test code
+end
+```
+
+### Verification Checklist
+
+When hardcoded /tmp paths are found:
+
+- [ ] **Identify all hardcoded /tmp paths** in the PR
+  ```bash
+  gh pr diff <PR_NUMBER> | grep -E "'/tmp/|\"\/tmp\/"
+  ```
+
+- [ ] **Verify each usage is replaced with tmpdir/tempfile**
+  - Check that `require 'tmpdir'` or `require 'tempfile'` is added
+  - Confirm `Dir.mktmpdir` or `Tempfile.create` is used
+  - Verify cleanup (block form or ensure block)
+
+- [ ] **Check for proper cleanup:**
+  - Block form (automatic): `Dir.mktmpdir('prefix') do |dir|`
+  - Manual form with ensure: `ensure FileUtils.remove_entry(dir)`
+  - Tempfile automatic cleanup: `Tempfile.create('name') do |f|`
+
+- [ ] **Verify tests pass with isolated temp directories:**
+  - Each test gets its own temp directory
+  - No shared state between tests
+  - Parallel test execution safe
+
+### Exceptions
+
+**The only acceptable /tmp references are:**
+
+1. **Documentation or comments** explaining why NOT to use /tmp:
+   ```ruby
+   # Don't use /tmp directly, use Dir.mktmpdir instead
+   ```
+
+2. **Testing tmpdir itself** (rare):
+   ```ruby
+   # Testing that tmpdir creates directories correctly
+   expect(Dir.mktmpdir('test')).to start_with(Dir.tmpdir)
+   ```
+
+3. **Reading system temp dir path** (not writing):
+   ```ruby
+   Dir.tmpdir  # Returns system temp directory
+   ```
+
+**Never acceptable:**
+- Writing to `/tmp/myapp/...`
+- Reading from `/tmp/cache/...`
+- Creating directories in `/tmp/specific_name/`
+- Any hardcoded path under `/tmp`
+
+### Feedback Template
+
+When hardcoded /tmp paths are found:
+
+```markdown
+❌ CRITICAL: Hardcoded /tmp paths found
+
+**Files with hardcoded /tmp paths:**
+
+1. **lib/datadog/di/snapshot_exporter.rb:45**
+   ```ruby
+   File.write('/tmp/snapshot.json', data)
+   ```
+
+   Replace with:
+   ```ruby
+   require 'tempfile'
+   Tempfile.create('snapshot.json') do |file|
+     file.write(data)
+     file.flush
+     # Use file.path
+   end
+   ```
+
+2. **spec/datadog/di/probe_spec.rb:123**
+   ```ruby
+   FileUtils.mkdir_p('/tmp/di_test')
+   ```
+
+   Replace with:
+   ```ruby
+   require 'tmpdir'
+   Dir.mktmpdir('di_test') do |dir|
+     # Use dir
+   end
+   ```
+
+**Why this matters:**
+- Hardcoded /tmp paths cause test collisions in parallel execution
+- Security vulnerability (predictable paths, symlink attacks)
+- Tests may fail in CI environments with restricted /tmp access
+- Previous test runs can leave files affecting subsequent tests
+
+**Required action:**
+- Replace all hardcoded /tmp paths with `Dir.mktmpdir` or `Tempfile.create`
+- Ensure proper cleanup (use block form or ensure blocks)
+- Verify tests pass after changes
+- Run tests in parallel to confirm no collisions: `bundle exec rspec --order random`
+```
+
 ## Review Checklist
 
 When reviewing a dd-trace-rb DI PR, verify:
@@ -735,6 +967,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] Thread-safe shared state access
 - [ ] Fork/fiber edge cases handled
 - [ ] Line probe test files verified (see Line Probe Test Files section)
+- [ ] NO hardcoded /tmp paths (use tmpdir instead)
 - [ ] Documentation updated
 - [ ] CHANGELOG updated if required
 - [ ] Trailing commas used in di/ and symbol_database/ directories (per CLAUDE.md)
@@ -751,6 +984,7 @@ To review a dd-trace-rb dynamic instrumentation PR:
 4. **Run critical checks**:
    - Search for skipped tests
    - Search for sleep in tests
+   - Search for hardcoded /tmp paths
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
@@ -769,6 +1003,11 @@ grep -rn "^\s*skip\|^\s*pending\|^\s*xit\|^\s*xdescribe" spec/ test/
 
 # Check for sleep in tests
 grep -rn "sleep\s\|Kernel\.sleep" spec/ test/
+
+# Check for hardcoded /tmp paths
+grep -rn "'/tmp/\|\"\/tmp\/" lib/ spec/
+grep -rn "File\.\(write\|read\|open\).*['\"]\/tmp\/" lib/ spec/
+grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
 
 # Run tests with coverage
 bundle exec rspec --require simplecov
@@ -830,6 +1069,13 @@ Provide review feedback in this structure:
 [Any rescue blocks without logging or telemetry]
 
 ## Additional Issues
+
+### ⚠️ Hardcoded /tmp Paths
+[If any hardcoded /tmp paths are found:]
+- List all files with hardcoded /tmp paths
+- Show the problematic lines
+- Suggest using Dir.mktmpdir or Tempfile.create instead
+- Verify proper cleanup (block form or ensure block)
 
 ### ⚠️ Line Probe Test Files
 [If any line probe test files were modified:]
