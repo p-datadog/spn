@@ -947,6 +947,227 @@ When hardcoded /tmp paths are found:
 - Run tests in parallel to confirm no collisions: `bundle exec rspec --order random`
 ```
 
+## Debugging Diagnostics Left in PR
+
+**Overview:** Debugging statements and diagnostic code must be removed before merging. These create noise in logs, can leak internal information, and indicate incomplete cleanup.
+
+**Critical Requirement:** All debugging code must be removed from production code and tests.
+
+### Common Debugging Patterns to Flag
+
+**Ruby debugging statements:**
+- `puts` / `p` / `pp` / `print` - Console output for debugging
+- `Kernel.puts` / `Kernel.p` / `Kernel.print` - Explicit kernel methods
+- `STDERR.puts` / `STDOUT.puts` - Direct stream writes
+- `warn` - Warnings used for debugging (not actual warnings)
+
+**Interactive debuggers:**
+- `binding.pry` - Pry debugger breakpoint
+- `binding.irb` - IRB debugger breakpoint
+- `debugger` - Generic debugger statement
+- `byebug` - Byebug debugger breakpoint
+
+**Diagnostic comments:**
+- `# DEBUG:` / `# DIAGNOSTIC:` - Debug markers in comments
+- `# TODO: remove` - Temporary code markers
+- `# FIXME: debug` - Debug-related fixme notes
+- `# XXX` - Placeholder markers
+
+### How to Check for Debugging Code
+
+```bash
+# Search for debugging statements in lib/ (production code)
+grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "Kernel\.\(puts\|p\|print\)" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "STDERR\.puts\|STDOUT\.puts" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "^\s*warn\s" lib/datadog/di/ lib/datadog/symbol_database/
+
+# Search for debugger breakpoints
+grep -rn "binding\.pry\|binding\.irb\|debugger\|byebug" lib/datadog/di/ lib/datadog/symbol_database/ spec/
+
+# Search for diagnostic comments
+grep -rn "# DEBUG:\|# DIAGNOSTIC:\|# TODO: remove\|# FIXME: debug\|# XXX" lib/datadog/di/ lib/datadog/symbol_database/
+
+# Search the PR diff specifically
+gh pr diff <PR_NUMBER> | grep -E "^\+.*\b(puts|warn|binding\.pry|# DEBUG:|# DIAGNOSTIC:)"
+```
+
+### Acceptable vs Unacceptable
+
+**❌ NEVER acceptable in production code (lib/):**
+
+```ruby
+# BAD - Debugging output
+def extract_method_parameters(method_name)
+  warn "[SymDB] extract_method_parameters: method=#{method_name} params=#{params.inspect}"
+  # ...
+end
+
+# BAD - Console debugging
+def process_probe(probe)
+  puts "Processing probe: #{probe.id}"
+  p probe
+  # ...
+end
+
+# BAD - Debugger breakpoint
+def execute
+  binding.pry if probe.id == '123'  # Left over from debugging
+  # ...
+end
+
+# BAD - Diagnostic comment
+def serialize
+  # DEBUG: This is failing intermittently
+  # DIAGNOSTIC: stderr logging for CI debugging
+  serialize_data
+end
+```
+
+**✅ Acceptable in production code:**
+
+```ruby
+# GOOD - Proper logger usage at appropriate level
+def extract_method_parameters(method_name)
+  Datadog.logger.debug { "Extracting parameters for #{method_name}" }
+  # ...
+end
+
+# GOOD - Telemetry for observability
+def process_probe(probe)
+  Datadog.telemetry.count('di.probe.processed', 1, tags: ["probe_id:#{probe.id}"])
+  # ...
+end
+
+# GOOD - Appropriate warning for customer-fixable issues
+def load_config(file)
+  unless File.exist?(file)
+    Datadog.logger.warn("Configuration file not found: #{file}")
+  end
+end
+```
+
+**⚠️ May be acceptable in tests (requires judgment):**
+
+```ruby
+# Generally BAD in tests - but less critical than in production
+it 'processes probe' do
+  puts "Debug: probe state = #{probe.inspect}"  # Should be removed
+  expect(probe.execute).to be_truthy
+end
+
+# ACCEPTABLE in tests - debugging test infrastructure itself
+# (But should have a clear comment explaining why it's needed)
+around do |example|
+  # Output test name for debugging CI failures
+  puts "Running: #{example.description}" if ENV['DEBUG_TESTS']
+  example.run
+end
+```
+
+### Exceptions
+
+**The only acceptable "debugging" output is:**
+
+1. **Proper Datadog logger usage:**
+   ```ruby
+   Datadog.logger.debug { "..." }  # ✅ OK
+   Datadog.logger.warn("...")      # ✅ OK (for customer-fixable issues)
+   ```
+
+2. **Telemetry for observability:**
+   ```ruby
+   Datadog.telemetry.error('event', error: e)  # ✅ OK
+   Datadog.metrics.increment('counter')        # ✅ OK
+   ```
+
+3. **Test infrastructure with clear justification:**
+   ```ruby
+   # Output for debugging CI-only failures (with ENV guard)
+   puts "CI Debug: #{state}" if ENV['CI_DEBUG']  # ✅ OK with clear comment
+   ```
+
+4. **Documentation showing what NOT to do:**
+   ```ruby
+   # Don't debug with puts, use Datadog.logger.debug instead
+   # BAD: puts variable.inspect
+   # GOOD: Datadog.logger.debug { variable.inspect }
+   ```
+
+### Example from Real PR
+
+**From your example:**
+
+```ruby
+# DIAGNOSTIC: stderr logging for CI debugging
+warn "[SymDB] extract_method_parameters: method=#{method_name} params=#{params.inspect}"
+```
+
+**Issues:**
+1. Using `warn` for debugging instead of proper logger
+2. Comment indicates this is temporary diagnostic code
+3. Should use `Datadog.logger.debug` if logging is needed
+4. If truly debugging CI issues, should be removed after debugging is complete
+
+**Fix:**
+
+```ruby
+# Remove entirely if no longer needed, or replace with proper logging:
+Datadog.logger.debug { "[SymDB] Extracting parameters for #{method_name}" }
+```
+
+### Feedback Template
+
+```markdown
+❌ Debugging diagnostics left in PR
+
+**Files with debugging code:**
+
+1. **lib/datadog/symbol_database/code_tracking.rb:245**
+   ```ruby
+   # DIAGNOSTIC: stderr logging for CI debugging
+   warn "[SymDB] extract_method_parameters: method=#{method_name} params=#{params.inspect}"
+   ```
+
+   **Issue:** Temporary debugging statement left in production code.
+
+   **Fix:** Remove entirely or replace with proper logger:
+   ```ruby
+   Datadog.logger.debug { "[SymDB] Extracting parameters for #{method_name}" }
+   ```
+
+2. **lib/datadog/di/probe_manager.rb:156**
+   ```ruby
+   puts "DEBUG: probe state = #{probe.inspect}"
+   ```
+
+   **Issue:** Console debugging output left in production code.
+
+   **Fix:** Remove this line.
+
+3. **spec/datadog/di/worker_spec.rb:89**
+   ```ruby
+   binding.pry  # TODO: remove
+   ```
+
+   **Issue:** Debugger breakpoint left in test.
+
+   **Fix:** Remove this line.
+
+**Why this matters:**
+- Debugging statements create noise in production logs
+- Can leak internal implementation details
+- Indicates incomplete cleanup
+- May have performance impact (inspect, string interpolation)
+- `warn` goes to STDERR and can trigger monitoring alerts
+
+**Required action:**
+- Remove all debugging statements from lib/ (production code)
+- Remove debugger breakpoints from tests
+- Replace with proper `Datadog.logger.debug` if logging is actually needed
+- Remove diagnostic comments (# DEBUG:, # DIAGNOSTIC:, # TODO: remove)
+```
+
 ## Review Checklist
 
 When reviewing a dd-trace-rb DI PR, verify:
@@ -960,6 +1181,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] ✅ Proper error handling (all rescues have DEBUG/WARN logging + telemetry)
 
 **Additional Quality Checks:**
+- [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
 - [ ] Bounded memory usage (no binding leaks)
@@ -985,6 +1207,7 @@ To review a dd-trace-rb dynamic instrumentation PR:
    - Search for skipped tests
    - Search for sleep in tests
    - Search for hardcoded /tmp paths
+   - Search for debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
@@ -1008,6 +1231,17 @@ grep -rn "sleep\s\|Kernel\.sleep" spec/ test/
 grep -rn "'/tmp/\|\"\/tmp\/" lib/ spec/
 grep -rn "File\.\(write\|read\|open\).*['\"]\/tmp\/" lib/ spec/
 grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
+
+# Check for debugging diagnostics in production code
+grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "Kernel\.\(puts\|p\|print\)" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "STDERR\.puts\|STDOUT\.puts" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "^\s*warn\s" lib/datadog/di/ lib/datadog/symbol_database/
+grep -rn "binding\.pry\|binding\.irb\|debugger\|byebug" lib/ spec/
+grep -rn "# DEBUG:\|# DIAGNOSTIC:\|# TODO: remove.*debug" lib/datadog/di/ lib/datadog/symbol_database/
+
+# Check for debugging diagnostics in the PR diff
+gh pr diff <PR_NUMBER> | grep -E "^\+.*\b(puts|warn|binding\.pry|# DEBUG:|# DIAGNOSTIC:)"
 
 # Run tests with coverage
 bundle exec rspec --require simplecov
@@ -1069,6 +1303,13 @@ Provide review feedback in this structure:
 [Any rescue blocks without logging or telemetry]
 
 ## Additional Issues
+
+### ⚠️ Debugging Diagnostics
+[If any debugging code is found:]
+- List all files with debugging statements
+- Show the problematic lines (puts, warn, binding.pry, # DEBUG:, etc.)
+- Indicate whether in production code (lib/) or tests (spec/)
+- Suggest removal or replacement with proper logger
 
 ### ⚠️ Hardcoded /tmp Paths
 [If any hardcoded /tmp paths are found:]
