@@ -12,11 +12,13 @@ This skill automatically fixes non-test CI failures in a pull request, including
 
 The skill automates the process of:
 1. Fetching a specific pull request
-2. Checking CI job status to identify failures
-3. Filtering for NON-TEST failures (lint, static analysis, typing)
-4. Fixing each type of failure
-5. Committing each fix with a descriptive message
-6. Pushing all commits to the PR branch
+2. **Reading CLAUDE.md** - Understanding repository coding guidelines
+3. Checking CI job status to identify failures
+4. Filtering for NON-TEST failures (lint, static analysis, typing)
+5. Fixing each type of failure
+6. **Applying CLAUDE.md rules** - Ensuring fixes follow all guidelines
+7. Committing each fix with a descriptive message
+8. Pushing all commits to the PR branch
 
 ## When This Skill Applies
 
@@ -49,7 +51,25 @@ This skill ONLY addresses **non-test failures**:
 
 ## Workflow
 
-### Step 1: Fetch PR and Check CI Status
+### Step 1: Read Repository Guidelines
+
+**CRITICAL:** Before making any fixes, read the repository's CLAUDE.md file to understand coding standards and guidelines.
+
+```bash
+# Read CLAUDE.md if it exists
+if [ -f CLAUDE.md ]; then
+  cat CLAUDE.md
+fi
+```
+
+Key guidelines to look for:
+- Trailing comma requirements
+- Code style conventions
+- Testing requirements
+- Error handling patterns
+- Any project-specific rules
+
+### Step 2: Fetch PR and Check CI Status
 
 ```bash
 # Checkout the PR
@@ -66,7 +86,7 @@ gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl
 - `state` = "FAILURE"
 - Name does NOT contain "test", "spec", "e2e", "integration"
 
-### Step 2: Identify Non-Test Failures
+### Step 3: Identify Non-Test Failures
 
 Look for failed checks matching these patterns:
 
@@ -102,7 +122,7 @@ Look for failed checks matching these patterns:
 - Contains "build" + "test"
 - Contains "Ruby X.X" (likely test jobs)
 
-### Step 3: Analyze Each Non-Test Failure
+### Step 4: Analyze Each Non-Test Failure
 
 For each identified non-test failure:
 
@@ -125,7 +145,7 @@ Parse the logs to understand:
 - What specific violations are reported
 - Whether the tool has an auto-fix option
 
-### Step 4: Fix Each Type of Failure (Commit Separately)
+### Step 5: Fix Each Type of Failure (Commit Separately)
 
 **CRITICAL: Make ONE commit per fix type**
 
@@ -520,7 +540,7 @@ EOF
 )"
 ```
 
-### Step 5: Push All Commits
+### Step 6: Push All Commits
 
 After all fixes are committed:
 

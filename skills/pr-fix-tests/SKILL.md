@@ -12,13 +12,15 @@ This skill automatically fixes test failures in a pull request. Each fix is comm
 
 The skill automates the process of:
 1. Fetching a specific pull request
-2. Checking CI job status to identify test failures
-3. Filtering for TEST failures only (not lint/static analysis/typing)
-4. Analyzing and fixing each test failure
-5. Committing each fix with a descriptive message
-6. Pushing all commits to the PR branch
-7. **Continuously monitoring CI status** (polling every minute)
-8. **Fixing any new or remaining test failures** until all tests pass
+2. **Reading CLAUDE.md** - Understanding repository coding guidelines
+3. Checking CI job status to identify test failures
+4. Filtering for TEST failures only (not lint/static analysis/typing)
+5. Analyzing and fixing each test failure
+6. **Applying CLAUDE.md rules** - Ensuring fixes follow all guidelines
+7. Committing each fix with a descriptive message
+8. Pushing all commits to the PR branch
+9. **Continuously monitoring CI status** (polling every minute)
+10. **Fixing any new or remaining test failures** until all tests pass
 
 ## When This Skill Applies
 
@@ -92,7 +94,25 @@ When a test fails inconsistently or shows signs of being flaky:
 
 ## Workflow
 
-### Step 1: Fetch PR and Check CI Status
+### Step 1: Read Repository Guidelines
+
+**CRITICAL:** Before making any fixes, read the repository's CLAUDE.md file to understand coding standards and guidelines.
+
+```bash
+# Read CLAUDE.md if it exists
+if [ -f CLAUDE.md ]; then
+  cat CLAUDE.md
+fi
+```
+
+Key guidelines to look for:
+- Trailing comma requirements
+- Code style conventions
+- Testing requirements (100% coverage for DI code)
+- Error handling patterns
+- Any project-specific rules
+
+### Step 2: Fetch PR and Check CI Status
 
 ```bash
 # Checkout the PR
@@ -109,7 +129,7 @@ gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl
 - `state` = "FAILURE"
 - Name DOES contain "test", "spec", "e2e", "integration", or "build"
 
-### Step 2: Identify Test Failures
+### Step 3: Identify Test Failures
 
 Look for failed checks matching these patterns:
 
@@ -130,7 +150,7 @@ Look for failed checks matching these patterns:
 - "Sorbet", "mypy", "type-check"
 - Pure formatting/linting jobs
 
-### Step 3: Analyze Each Test Failure
+### Step 4: Analyze Each Test Failure
 
 For each identified test failure:
 
@@ -153,7 +173,7 @@ Parse the logs to understand:
 - Error messages and stack traces
 - Root cause of the failure
 
-### Step 4: Fix Each Test Failure (Commit Separately)
+### Step 5: Fix Each Test Failure (Commit Separately)
 
 **CRITICAL: Make ONE commit per logical fix**
 
@@ -246,7 +266,7 @@ it "finds only active users" do
 end
 ```
 
-### Step 5: Commit Each Fix
+### Step 6: Commit Each Fix
 
 After fixing a test or group of related tests:
 
@@ -317,7 +337,7 @@ Fixes failing test in spec/services/processor_spec.rb:112.
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-### Step 6: Push All Commits
+### Step 7: Push All Commits
 
 After all fixes are committed:
 
@@ -329,7 +349,7 @@ git log origin/$(git branch --show-current)..HEAD --oneline
 git push origin HEAD
 ```
 
-### Step 7: Continuously Monitor CI and Fix Remaining Failures
+### Step 8: Continuously Monitor CI and Fix Remaining Failures
 
 **IMPORTANT:** After pushing fixes, continuously monitor CI status and fix any remaining or new test failures.
 
