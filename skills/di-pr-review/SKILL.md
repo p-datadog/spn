@@ -21,6 +21,187 @@ Use this skill when reviewing PRs in `datadog/dd-trace-rb` that involve:
 - Method interception
 - Profiling or tracing instrumentation
 
+## Fundamental Principle: Test Failures Are Always Relevant
+
+**CRITICAL MINDSET:** All test failures indicate real problems. There is no such thing as an "irrelevant" test failure.
+
+### The Wrong Mindset
+
+❌ **"Tests fail due to environment issues, so the code is fine and tests are the problem"**
+- Leads to skipping tests
+- Leads to accepting flaky tests
+- Leads to working around test failures instead of fixing root causes
+- Results in untestable, unreliable code
+
+### The Correct Mindset
+
+✅ **"If tests can't reliably verify behavior, the code isn't testable. That's a design flaw."**
+
+When a test fails or can't pass reliably, one of these is true:
+1. **Code needs refactoring** - Add hooks, expose state, inject dependencies
+2. **Code needs redesign** - Use a different architecture that's testable
+3. **Feature should be removed** - If behavior can't be verified, it can't be trusted
+
+**Never acceptable:** "It works in production so test failures don't matter"
+
+### What Makes Code Testable
+
+**✅ Testable code has:**
+- **Observable state** - Can check results and verify outcomes
+- **Controllable inputs** - Can inject mocks, fakes, test doubles
+- **Deterministic behavior** - Same inputs always produce same outputs
+- **Synchronization hooks** - Callbacks, queues, or completion signals for async operations
+
+**❌ Untestable code has:**
+- **Hidden internal state** - No way to observe or verify behavior
+- **Hard-coded dependencies** - Can't inject test doubles or control behavior
+- **Non-deterministic timing** - Relies on sleep, race conditions, arbitrary waits
+- **Fire-and-forget async** - Threads/background work with no completion hooks
+
+### For Any Failing Test
+
+**Don't ask:** "How do I make this test pass despite the code?"
+
+**Ask:** "What needs to change in the code to make it testable?"
+
+**Then:** Refactor the code, don't work around it in tests.
+
+### Examples of Testability Problems
+
+**❌ Example 1: Fire-and-forget thread**
+```ruby
+def start_worker
+  Thread.new do
+    loop do
+      process_queue
+      sleep 1
+    end
+  end
+  nil  # No way to know when worker started or check its state
+end
+
+# Test has no choice but to use sleep and hope
+it 'processes items' do
+  worker.start_worker
+  sleep 2  # Flaky: hope worker started and ran
+  expect(queue).to be_empty
+end
+```
+
+**✅ Fix: Add observable state and synchronization**
+```ruby
+def start_worker
+  @worker_started = Queue.new
+  @worker_thread = Thread.new do
+    @worker_started.push(true)
+    loop do
+      process_queue
+      sleep 1
+    end
+  end
+  @worker_started.pop  # Block until worker confirms it started
+end
+
+def stop_worker
+  @worker_thread.kill if @worker_thread
+end
+
+# Test is deterministic
+it 'processes items' do
+  worker.start_worker  # Blocks until worker is ready
+  expect(queue).to be_empty
+  worker.stop_worker
+end
+```
+
+**❌ Example 2: Hard-coded dependency**
+```ruby
+def export_data
+  HTTPClient.post('https://api.example.com/data', data)
+end
+
+# Test can't control HTTP behavior, must use real network or VCR
+it 'exports data' do
+  # Flaky: depends on network, real API, timing
+  expect { exporter.export_data }.not_to raise_error
+end
+```
+
+**✅ Fix: Inject dependency**
+```ruby
+def initialize(http_client: HTTPClient.new)
+  @http_client = http_client
+end
+
+def export_data
+  @http_client.post('https://api.example.com/data', data)
+end
+
+# Test is fast and deterministic
+it 'exports data' do
+  mock_client = double('http_client')
+  expect(mock_client).to receive(:post).with(anything, data)
+  exporter = Exporter.new(http_client: mock_client)
+  exporter.export_data
+end
+```
+
+**❌ Example 3: Hidden state**
+```ruby
+def process_probe(probe)
+  @internal_cache[probe.id] = probe
+  update_internal_metrics
+  # No way to verify cache was updated or metrics were recorded
+end
+
+# Test can't verify behavior
+it 'processes probe' do
+  processor.process_probe(probe)
+  # ??? How to check if it worked?
+end
+```
+
+**✅ Fix: Expose state or return results**
+```ruby
+def process_probe(probe)
+  @probes[probe.id] = probe
+  metrics = update_metrics(probe)
+  { cached: true, metrics: metrics }
+end
+
+attr_reader :probes  # Or provide a query method
+
+# Test can verify behavior
+it 'processes probe' do
+  result = processor.process_probe(probe)
+  expect(result[:cached]).to be true
+  expect(processor.probes[probe.id]).to eq(probe)
+  expect(result[:metrics][:count]).to eq(1)
+end
+```
+
+### Application to Review
+
+When reviewing a PR:
+
+1. **If tests are skipped:** Don't accept it. The code needs to be refactored to be testable.
+
+2. **If tests use sleep:** The code needs synchronization hooks (callbacks, queues, completion signals).
+
+3. **If tests are flaky:** The code has non-deterministic behavior that needs to be fixed.
+
+4. **If tests can't verify behavior:** The code needs observable state or return values.
+
+5. **If code "works in production but tests fail":** The code isn't properly testable and needs redesign.
+
+### Summary
+
+**Test failures are not test problems - they're code design problems.**
+
+The solution is always to improve the code's testability, not to skip tests, add sleeps, or work around the tests.
+
+This is a fundamental principle that applies to ALL the review requirements below.
+
 ## CRITICAL Review Requirements
 
 All 6 requirements below are **BLOCKING**. PRs must not be approved until all issues are resolved.
@@ -29,6 +210,8 @@ All 6 requirements below are **BLOCKING**. PRs must not be approved until all is
 
 **Requirement:** All tests must run and pass. Skipped tests are NOT acceptable.
 
+**Principle:** If a test can't pass, the code isn't testable. Fix the code, not the test. (See "Fundamental Principle" section above.)
+
 **Review actions:**
 - Search for skip patterns in test files:
   - RSpec: `skip`, `pending`, `xit`, `xdescribe`, `skip_if`
@@ -36,9 +219,20 @@ All 6 requirements below are **BLOCKING**. PRs must not be approved until all is
   - Any commented-out test methods
 - Flag EVERY skipped test as **CRITICAL**
 - Required resolution: Tests MUST be fixed to run and pass
+- The fix is almost always to refactor the CODE to be testable, not to work around it in tests
 - If you cannot fix the test, ask for assistance
 - "Will fix later" is NOT acceptable
 - Deleting tests is NOT acceptable
+
+**Common reasons for skipped tests and how to fix:**
+
+| Reason | Wrong Fix | Right Fix |
+|--------|-----------|-----------|
+| "Flaky test" | Skip it | Add synchronization hooks to code (callbacks, queues) |
+| "Timing issues" | Use longer sleep | Add deterministic waits, expose completion signals |
+| "Hard to test" | Skip it | Refactor code to inject dependencies |
+| "Environment specific" | Skip conditionally | Make code work in all environments or mock environment |
+| "Race condition" | Skip it | Add proper synchronization primitives to code |
 
 **How to check:**
 ```bash
@@ -55,6 +249,13 @@ Line: skip "test fork behavior"
 
 This test MUST be fixed to run and pass reliably.
 
+**The problem is NOT the test - it's that the code isn't testable.**
+
+The fork behavior needs to be refactored to be observable and verifiable:
+- Add hooks to detect when fork has completed
+- Expose state to verify fork behavior
+- Use dependency injection to make fork behavior controllable in tests
+
 If you cannot fix this test, ask for assistance from the team.
 Do not delete tests - they exist for a reason and must be made to work.
 
@@ -65,19 +266,34 @@ Skipped tests create false confidence. This is blocking approval.
 
 **Requirement:** Tests must use deterministic waits, not arbitrary sleep calls.
 
+**Principle:** Sleep in tests is a symptom of untestable code. The code needs synchronization hooks, not the test needs longer sleeps. (See "Fundamental Principle" section above.)
+
 **Review actions:**
 - Search for sleep patterns:
   - `sleep`, `Kernel.sleep`
   - `Thread.pass` in loops
   - Any time-based delays
 - Flag ALL sleep calls as **CRITICAL**
-- Require replacement with deterministic synchronization
+- Require replacement with deterministic synchronization **in the production code**, not workarounds in tests
 
-**Acceptable alternatives:**
-- Queue-based synchronization: `queue.pop` with timeout
-- Condition variables: `ConditionVariable#wait`
-- Mock time: `Timecop.freeze`, `travel_to`
-- Explicit callbacks: `on_complete { queue.push(:done) }`
+**The root cause is always untestable code:**
+- Code starts async work but provides no completion signal
+- Code has internal timing dependencies with no hooks
+- Code lacks observable state to check readiness
+- Code provides no way to wait for operations to complete
+
+**The fix is to refactor the CODE to add:**
+- Completion callbacks or signals
+- Observable state (status flags, queues)
+- Synchronization primitives (Queue, ConditionVariable)
+- Return values indicating completion
+- Hooks for test control
+
+**Acceptable patterns (require code changes):**
+- Queue-based synchronization: `queue.pop` with timeout (add queue to code)
+- Condition variables: `ConditionVariable#wait` (add ConditionVariable to code)
+- Mock time: `Timecop.freeze`, `travel_to` (for time-based logic only)
+- Explicit callbacks: `on_complete { queue.push(:done) }` (add callback to code)
 
 **How to check:**
 ```bash
@@ -92,19 +308,46 @@ grep -r "sleep\s\|Kernel\.sleep" spec/ test/
 File: spec/dynamic_instrumentation/async_spec.rb:78
 Line: sleep 0.5  # Wait for async processing
 
-This makes tests flaky and slow. Replace with:
+**The problem is NOT the test - the PRODUCTION CODE lacks synchronization hooks.**
 
-# BAD
+Current code (untestable):
+```ruby
+# lib/datadog/di/worker.rb
+def start_async
+  Thread.new { do_work }  # Fire and forget - no way to know when done
+end
+```
+
+Test has no choice but to sleep:
+```ruby
+# BAD (but only option with current code)
 worker.start_async
-sleep 0.5
+sleep 0.5  # Hope it's done?
 expect(worker.completed?).to be true
+```
 
-# GOOD
+**Required fix: Add completion callback to production code**
+
+```ruby
+# lib/datadog/di/worker.rb - REFACTORED
+def start_async(&on_complete)
+  Thread.new do
+    do_work
+    on_complete&.call
+  end
+end
+```
+
+Now test can be deterministic:
+```ruby
+# GOOD (requires code change above)
 queue = Queue.new
-worker.on_complete { queue.push(:done) }
-worker.start_async
+worker.start_async { queue.push(:done) }
 Timeout.timeout(2) { queue.pop }
 expect(worker.completed?).to be true
+```
+
+**This requires changing lib/datadog/di/worker.rb, not just the test.**
 ```
 
 ### 3. 100% Code Coverage (CRITICAL)
@@ -1385,6 +1628,114 @@ When the user says things like:
 3. **Add test coverage** - Ensure fixes have full test coverage (100% for DI code)
 4. **Commit the fix** - Create a commit with descriptive message
 5. **Verify the fix** - Confirm the issue is resolved
+
+### CRITICAL: How to Fix Test Issues
+
+**Remember the fundamental principle:** Test failures indicate code design problems, not test problems.
+
+**When fixing test issues (skipped tests, sleep in tests, flaky tests):**
+
+1. **DO NOT just change the test** - The test is revealing a design flaw
+2. **DO refactor the production code** - Make the code testable
+3. **THEN update the test** - To use the new testability hooks
+
+**Example: Fixing a skipped test**
+
+**❌ Wrong approach (only changing test):**
+```ruby
+# Before: test is skipped because it's flaky
+skip "flaky test - sometimes worker doesn't finish in time"
+
+# Wrong fix: increase timeout and hope
+it 'processes data' do
+  worker.start
+  sleep 5  # Increased from 1 second, still flaky
+  expect(worker.queue).to be_empty
+end
+```
+
+**✅ Right approach (refactor production code first):**
+
+**Step 1: Refactor production code to add testability hooks**
+```ruby
+# lib/datadog/di/worker.rb - ADD OBSERVABILITY
+class Worker
+  def initialize
+    @completion_queue = Queue.new  # NEW: for tests to wait on
+  end
+
+  attr_reader :completion_queue  # NEW: expose for tests
+
+  def start
+    Thread.new do
+      process_all
+      @completion_queue.push(:done)  # NEW: signal completion
+    end
+  end
+end
+```
+
+**Step 2: Update test to use new hooks**
+```ruby
+# spec/datadog/di/worker_spec.rb - USE NEW HOOKS
+it 'processes data' do
+  worker.start
+  Timeout.timeout(2) { worker.completion_queue.pop }  # Deterministic
+  expect(worker.queue).to be_empty
+end
+```
+
+**Example: Fixing sleep in tests**
+
+**❌ Wrong approach:**
+```ruby
+# Just remove sleep and hope test still works
+it 'exports data' do
+  exporter.export_async
+  # Removed sleep, now test is even more flaky
+  expect(last_export).to eq(data)
+end
+```
+
+**✅ Right approach:**
+
+**Step 1: Add callback support to production code**
+```ruby
+# lib/datadog/di/exporter.rb - ADD CALLBACK
+def export_async(data, &on_complete)
+  Thread.new do
+    export(data)
+    on_complete&.call  # NEW: call completion callback
+  end
+end
+```
+
+**Step 2: Use callback in test**
+```ruby
+# spec/datadog/di/exporter_spec.rb - USE CALLBACK
+it 'exports data' do
+  queue = Queue.new
+  exporter.export_async(data) { queue.push(:done) }
+  Timeout.timeout(2) { queue.pop }  # Wait for callback
+  expect(last_export).to eq(data)
+end
+```
+
+**Common patterns for making code testable:**
+
+| Untestable Pattern | Testable Refactor |
+|-------------------|-------------------|
+| Fire-and-forget thread | Add completion callback/queue |
+| Hidden internal state | Expose via attr_reader or query method |
+| Hard-coded dependency | Inject via initialize parameter |
+| No way to wait | Add observable state or completion signal |
+| Background loop | Add stop method and status query |
+| Race condition | Add synchronization primitives (Mutex, Queue) |
+
+**Files you'll need to edit:**
+- Production code file (lib/datadog/di/*.rb) - to add testability
+- Test file (spec/datadog/di/*_spec.rb) - to use new hooks
+- Both changes go in the same commit
 
 ### Example Follow-Up Flows
 
