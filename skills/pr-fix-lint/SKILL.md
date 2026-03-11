@@ -1,7 +1,7 @@
 ---
 name: pr-fix-lint
-description: This skill should be used when the user asks to "fix lint", "fix CI", "fix static analysis", "fix typing errors", or mentions fixing non-test CI failures in a pull request.
-version: 0.1.0
+description: This skill should be used when the user asks to "fix lint", "fix CI", "fix static analysis", "fix typing errors", "fix type check", "fix steep", or mentions fixing non-test CI failures in a pull request.
+version: 0.2.0
 ---
 
 # PR Fix Lint
@@ -23,7 +23,7 @@ The skill automates the process of:
 Use this skill when:
 - User asks to "fix lint failures in PR"
 - User wants to "fix CI failures" (excluding test failures)
-- User mentions "fix RuboCop", "fix static analysis", "fix typing errors"
+- User mentions "fix RuboCop", "fix static analysis", "fix typing errors", "fix type check", "fix steep"
 - PR has non-test CI failures that can be automatically fixed
 - User wants to clean up code quality issues before review
 
@@ -34,7 +34,7 @@ This skill ONLY addresses **non-test failures**:
 ### ✅ Addressed (Non-Test Failures)
 - **Linting:** RuboCop, ESLint, Pylint, etc.
 - **Static Analysis:** Brakeman, Sorbet, mypy, etc.
-- **Type Checking:** TypeScript, Flow, Sorbet strict mode
+- **Type Checking:** TypeScript, Flow, Sorbet, Steep (Ruby), mypy (Python)
 - **Code Formatting:** Prettier, Black, gofmt, rubyfmt
 - **Security Scanning:** CodeQL, bundler-audit (auto-fixable issues)
 - **Style Checks:** Code style violations
@@ -294,6 +294,190 @@ EOF
 )"
 ```
 
+**Steep (Ruby):**
+
+**CRITICAL RULES FOR STEEP:**
+
+1. **Fix genuine code issues** - If type error reveals a real bug, fix the code
+2. **Silence unclear errors** - If unclear whether it's genuine, add steep ignore directives
+3. **NEVER change code only to satisfy steep** - Don't refactor just to make errors go away
+4. **Nil checks** - When steep thinks a value is possibly nil but you're confident it's not, silence the error, don't change code
+
+**Known false positives (always silence, don't fix):**
+- **Type narrowing** - Value was checked to be not nil then used, steep doesn't understand the nil check happened
+- **Cross-scope assignments** - Value being set across scopes (e.g., in lambda or block)
+- **Multi-type containers** - Arrays, hashes with values of multiple types
+
+```bash
+# Check Steep errors
+bundle exec steep check
+
+# Analyze each error:
+# - Is this a genuine bug? → Fix the code
+# - Is this a false positive? → Add steep ignore directive
+# - Not sure? → Add steep ignore directive
+
+# Example: Type narrowing false positive
+# Before:
+#   user = find_user(id)
+#   if user
+#     user.name  # Steep error: receiver may be nil
+#   end
+#
+# Don't change to: user&.name (changes behavior!)
+# Instead, add steep ignore:
+
+# @type var user: User?
+user = find_user(id)
+if user
+  # steep:ignore:start NoMethod
+  user.name  # Steep thinks this might be nil, but we checked above
+  # steep:ignore:end
+end
+
+# Example: Value set in block
+# Before:
+#   result = nil
+#   some_block do
+#     result = compute_value()  # Sets result
+#   end
+#   process(result)  # Steep error: argument may be nil
+#
+# Don't refactor the code!
+# Instead, add steep ignore:
+
+result = nil
+some_block do
+  result = compute_value()
+end
+# steep:ignore:start
+process(result)  # Steep doesn't track that result was set in block
+# steep:ignore:end
+
+# Example: Multi-type array
+# Before:
+#   items = [1, "hello", :symbol]
+#   items.each { |item| puts item }  # Steep error: union types
+#
+# Don't split into separate arrays!
+# Instead, add steep ignore or type annotation:
+
+# @type var items: Array[Integer | String | Symbol]
+items = [1, "hello", :symbol]
+items.each { |item| puts item }
+
+# After fixing genuine issues and silencing false positives, commit
+git add -A
+git commit -m "$(cat <<'EOF'
+Fix Steep type checking errors
+
+Address genuine type issues and silence false positives with
+steep ignore directives. Steep errors silenced for:
+- Type narrowing after nil checks
+- Values set across lambda/block scopes
+- Multi-type containers
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+**Steep ignore directive formats:**
+
+```ruby
+# Single line ignore
+user.name # steep:ignore NoMethod
+
+# Block ignore
+# steep:ignore:start
+code_with_false_positives()
+more_code()
+# steep:ignore:end
+
+# Ignore specific error types
+# steep:ignore NoMethod
+user.name
+
+# steep:ignore UnresolvedOverloading
+array.map { |x| process(x) }
+
+# Type annotations to help Steep understand
+# @type var value: String
+value = might_return_nil_but_we_know_it_wont()
+
+# @type var items: Array[Integer | String]
+items = [1, 2, "hello"]
+```
+
+**Decision tree for Steep errors:**
+
+```
+Steep reports error
+  ├─ Does this reveal a real bug? (wrong type, missing nil check for actual nil)
+  │  └─ YES → Fix the code (add nil check, fix type)
+  │
+  ├─ Is this a false positive?
+  │  ├─ Type narrowing not recognized? → Add steep ignore
+  │  ├─ Value set in block/lambda? → Add steep ignore
+  │  ├─ Multi-type container? → Add type annotation or steep ignore
+  │  └─ Other false positive? → Add steep ignore
+  │
+  └─ Not sure if genuine or false positive?
+     └─ Add steep ignore (safer to silence than to change working code)
+```
+
+**Examples of genuine bugs to fix:**
+
+```ruby
+# BAD - Genuine bug, steep is right
+user = User.find_by(id: params[:id])  # Returns nil if not found
+user.update(name: "test")  # Bug! user might be nil
+
+# GOOD - Fix the code
+user = User.find_by(id: params[:id])
+if user
+  user.update(name: "test")
+else
+  handle_not_found()
+end
+
+# BAD - Genuine type error
+def process(value: String)
+  puts value.upcase
+end
+
+process(value: 123)  # Bug! passing Integer instead of String
+
+# GOOD - Fix the call
+process(value: "123")
+```
+
+**Examples of false positives to silence:**
+
+```ruby
+# FALSE POSITIVE - Type narrowing
+user = find_user(id)
+if user  # Nil check here
+  # steep:ignore:start
+  user.name  # Steep doesn't understand we checked nil above
+  # steep:ignore:end
+end
+
+# FALSE POSITIVE - Value set in block
+result = nil
+transaction do
+  result = create_user()
+end
+# steep:ignore:start
+send_notification(result)  # Steep doesn't track assignment in block
+# steep:ignore:end
+
+# FALSE POSITIVE - Multi-type array
+# @type var mixed: Array[Integer | String]
+mixed = [1, 2, "three"]
+mixed.each { |item| puts item }  # Steep might complain about union type
+```
+
 **mypy (Python):**
 ```bash
 # Check mypy errors
@@ -420,6 +604,12 @@ Is check failing?
           ├─ Black → Run `black .` → Commit
           ├─ TypeScript → Analyze errors → Fix manually → Commit
           ├─ Sorbet → Analyze errors → Fix manually → Commit
+          ├─ Steep → Analyze each error:
+          │   ├─ Genuine bug? → Fix code → Commit
+          │   ├─ Type narrowing false positive? → Add steep ignore → Commit
+          │   ├─ Cross-scope assignment? → Add steep ignore → Commit
+          │   ├─ Multi-type container? → Add steep ignore → Commit
+          │   └─ Unclear? → Add steep ignore → Commit
           ├─ mypy → Analyze errors → Fix manually → Commit
           └─ Other → Investigate logs → Fix if possible → Commit
 ```
@@ -525,6 +715,7 @@ black .                             # Python formatting
 ruff check --fix .                  # Python linting
 golangci-lint run --fix             # Go linting
 npx tsc --noEmit                    # TypeScript checking
+bundle exec steep check             # Steep type checking (Ruby)
 
 # Commit with heredoc (proper formatting)
 git commit -m "$(cat <<'EOF'
@@ -554,6 +745,7 @@ git push origin HEAD
 7. **Skip test failures** - Only fix non-test issues
 8. **Report clearly** - Show what was fixed and what was skipped
 9. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
+10. **Steep errors** - Prefer steep ignore directives over code changes; only fix genuine bugs
 
 ## Safety Checks
 
@@ -571,3 +763,4 @@ Before pushing:
 - Some tools (like TypeScript) may require multiple iterations
 - Be aware of tool configuration files (`.rubocop.yml`, `.eslintrc`, etc.)
 - Respect the project's existing code style and conventions
+- **Steep type checker**: Most errors are false positives due to limitations in type narrowing and cross-scope tracking. When in doubt, add `steep:ignore` directives rather than changing working code. Only fix the code if the error reveals a genuine bug (actual nil dereference, wrong type passed, etc.)
