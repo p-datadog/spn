@@ -533,7 +533,7 @@ When a line probe test file is modified in the PR:
 #### Scenario 1: Safe - Lines Added at End ✅
 
 ```ruby
-# File: spec/datadog/di/support/test_target.rb
+# File: spec/datadog/di/some_test_file.rb
 class TestTarget
   def method_one  # Line 2 - referenced in tests
     puts "one"
@@ -555,7 +555,7 @@ end
 #### Scenario 2: Dangerous - Lines Added in Middle ⚠️
 
 ```ruby
-# File: spec/datadog/di/support/test_target.rb
+# File: spec/datadog/di/some_test_file.rb
 class TestTarget
   def method_one  # Line 2 - referenced in tests
     puts "one"
@@ -574,7 +574,7 @@ end
 
 **Required verification:**
 - Tests referencing line 6 must now reference line 11
-- Check all tests that use `test_target.rb` with line numbers
+- Check all tests that use this file with line numbers
 
 #### Scenario 3: Test Updated Correctly ✅
 
@@ -582,7 +582,7 @@ end
 # Before PR:
 it 'sets probe at method_two' do
   probe = Datadog::DI::Probe.new(
-    file: 'spec/datadog/di/support/test_target.rb',
+    file: 'spec/datadog/di/some_test_file.rb',
     lineno: 6  # method_two
   )
   # test continues...
@@ -591,7 +591,7 @@ end
 # After PR (correctly updated):
 it 'sets probe at method_two' do
   probe = Datadog::DI::Probe.new(
-    file: 'spec/datadog/di/support/test_target.rb',
+    file: 'spec/datadog/di/some_test_file.rb',
     lineno: 11  # method_two - UPDATED
   )
   # test continues...
@@ -604,7 +604,7 @@ end
 # After PR (NOT updated - still references old line):
 it 'sets probe at method_two' do
   probe = Datadog::DI::Probe.new(
-    file: 'spec/datadog/di/support/test_target.rb',
+    file: 'spec/datadog/di/some_test_file.rb',
     lineno: 6  # BUG: This is now method_new, not method_two!
   )
   # test continues...
@@ -641,32 +641,43 @@ When a line probe test file is modified:
   bundle exec rspec spec/datadog/di/*_spec.rb -e "pattern matching test name"
   ```
 
-### Common Line Probe Test Files
+### Identifying Line Probe Test Files
 
-Files that commonly contain line number markers:
-- `spec/datadog/di/support/test_target.rb`
-- `spec/datadog/di/support/probe_test_file.rb`
-- `spec/datadog/di/integration/line_probe_test_file.rb`
-- Any file in `spec/datadog/di/` with `target` or `probe_test` in the name
+Line probe test files are typically used in tests that create probes with specific line numbers. To identify them:
 
-**Note:** This list may not be exhaustive. Always search for line number references when in doubt.
+```bash
+# Find files referenced with lineno in tests
+grep -r "lineno:" spec/datadog/di/ | grep -oP 'file:.*\.rb' | sort -u
+
+# Find test files that might be used as probe targets
+find spec/datadog/di -name "*target*" -o -name "*probe_test*" -o -name "code_tracker_test_class*"
+```
+
+Common patterns:
+- Files with `target`, `probe_test`, or `test_class` in the name
+- Files in `spec/datadog/di/` that are imported but not run as tests
+- Files referenced with `lineno:` parameter in test specs
+
+**Note:** Always search for line number references when modifying any file in `spec/datadog/di/`.
 
 ### Commands Reference
 
 ```bash
-# Find line probe test files
-find spec/datadog/di -name "*target*" -o -name "*probe_test*"
-grep -r "# [Ll]ine" spec/datadog/di/
+# Find files referenced with line numbers in tests
+grep -r "lineno:" spec/datadog/di/ | grep -oP 'file:.*\.rb' | sort -u
 
-# Check if a file is referenced by line number
-file="test_target.rb"
+# Find potential line probe test files
+find spec/datadog/di -name "*target*" -o -name "*probe_test*" -o -name "code_tracker_test_class*"
+
+# Check if a specific file is referenced by line number
+file="your_file.rb"
 grep -r "$file" spec/datadog/di/ | grep -E "lineno|line:"
 
 # View PR diff for specific file
 gh pr diff <PR_NUMBER> -- path/to/file.rb
 
 # Run specific tests
-bundle exec rspec spec/datadog/di/probe_spec.rb
+bundle exec rake spec:main
 ```
 
 ### Feedback Template
@@ -676,26 +687,28 @@ When line probe test files are modified incorrectly:
 ```markdown
 ⚠️ WARNING: Line probe test file modified
 
-**File:** spec/datadog/di/support/test_target.rb
+**File:** [path to modified file]
 
 **Issue:** Lines were added/removed in the middle of the file, which shifts line numbers for existing methods. Tests that reference this file by line number may now be broken.
 
 **Analysis:**
-- Line 6 was `def method_two`, now it's `def method_new`
-- Line 11 is now `def method_two` (moved from line 6)
+- Line X was `def method_name`, now it's `def new_method`
+- Line Y is now `def method_name` (moved from line X)
 
 **Tests that need verification:**
-- spec/datadog/di/probe_spec.rb:145 - references line 6
-- spec/datadog/di/line_probe_integration_spec.rb:234 - references line 6
-- spec/datadog/di/probe_manager_spec.rb:89 - references line 6
+[List specific test files and line numbers that reference the modified file]
 
 **Required action:**
-1. Update all line number references from 6 to 11 where they should point to method_two
-2. Verify the tests still pass and test the intended behavior
-3. Consider adding comments to mark important line numbers:
+1. Search for all line number references to this file:
+   ```bash
+   grep -r "$(basename modified_file.rb)" spec/datadog/di/ | grep "lineno"
+   ```
+2. Update all line number references to match the new line positions
+3. Verify the tests still pass and test the intended behavior
+4. Consider adding comments to mark important line numbers:
    ```ruby
-   def method_two  # Line 11 - used in probe tests
-     puts "two"
+   def method_name  # Line Y - used in probe tests
+     # method body
    end
    ```
 
