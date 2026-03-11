@@ -1108,15 +1108,19 @@ When the user says things like:
 - "Add the missing telemetry"
 
 **You must:**
-1. **Actually fix the code** - Make the necessary changes using Edit tool
-2. **Commit the fix** - Create a commit with descriptive message
-3. **Verify the fix** - Confirm the issue is resolved
+1. **Read CLAUDE.md** - First, read the repository's CLAUDE.md file to understand all coding guidelines
+2. **Actually fix the code** - Make the necessary changes using Edit tool
+3. **Follow all rules** - Apply both CLAUDE.md guidelines and review skill requirements
+4. **Add test coverage** - Ensure fixes have full test coverage (100% for DI code)
+5. **Commit the fix** - Create a commit with descriptive message
+6. **Verify the fix** - Confirm the issue is resolved
 
 **DO NOT:**
 - Just explain what needs to be fixed
 - Provide a code snippet without applying it
 - Say "you should do X" or "recommend changing Y"
 - Wait for further instructions
+- Skip reading CLAUDE.md
 
 ### Example Follow-Up Flow
 
@@ -1133,10 +1137,13 @@ This makes tests flaky. Replace with deterministic synchronization.
 **User says:** "Fix the sleep"
 
 **Correct response:**
-1. Read the test file
-2. Identify the problematic sleep call and surrounding context
-3. Replace sleep with proper synchronization (Queue, ConditionVariable, etc.)
-4. Commit the change:
+1. **Read CLAUDE.md** - Check for coding guidelines (trailing commas, etc.)
+2. **Read the test file** - Understand the test context
+3. **Identify the problematic sleep** - Understand what it's waiting for
+4. **Replace sleep** - Use proper synchronization (Queue, ConditionVariable, etc.)
+5. **Apply CLAUDE.md rules** - Ensure trailing commas, proper formatting
+6. **Verify test still passes** - The fix shouldn't break the test
+7. **Commit the change:**
    ```bash
    git commit -m "Replace sleep with queue-based synchronization in worker_spec.rb
 
@@ -1158,11 +1165,80 @@ When asked to fix multiple issues:
 ```bash
 # User: "Fix all the sleep calls"
 # Your actions:
-1. Read all test files with sleep
-2. Fix each sleep call with proper synchronization
-3. Commit each file separately with descriptive messages
-4. Report what was fixed
+1. Read CLAUDE.md for coding guidelines
+2. Read all test files with sleep
+3. Fix each sleep call with proper synchronization
+4. Apply CLAUDE.md rules to each fix
+5. Commit each file separately with descriptive messages
+6. Report what was fixed
 ```
+
+### Following CLAUDE.md and Review Rules
+
+**CRITICAL:** When fixing issues, you must follow ALL rules from:
+1. The repository's CLAUDE.md file
+2. This review skill's requirements
+
+**Before making any fix:**
+```bash
+# Step 1: Read CLAUDE.md
+Read CLAUDE.md to understand:
+- Trailing comma requirements (di/ and symbol_database/ directories)
+- Code style conventions
+- Any project-specific rules
+
+# Step 2: Apply all review requirements to your fix
+- 100% test coverage for new/changed code
+- Error boundaries where needed
+- Proper error handling (logging + telemetry)
+- No hardcoded /tmp paths
+- No sleep in tests
+- No skipped tests
+```
+
+**Example: Fixing a missing error boundary**
+
+When adding an error boundary, you must also:
+- ✅ Add test coverage for the error boundary (100% coverage requirement)
+- ✅ Use trailing commas in di/ and symbol_database/ directories
+- ✅ Add both logging (DEBUG/WARN) and telemetry
+- ✅ Test that exceptions are caught and don't propagate
+- ✅ Follow all other CLAUDE.md guidelines
+
+**Example: Fixing sleep in tests**
+
+When removing sleep from a test, you must also:
+- ✅ Ensure the replacement (Queue, ConditionVariable) has test coverage
+- ✅ Use trailing commas per CLAUDE.md
+- ✅ Verify the test is deterministic (no flakiness)
+- ✅ Confirm the test actually tests what it claims to test
+
+**Example: Fixing hardcoded /tmp path**
+
+When replacing a hardcoded /tmp path, you must also:
+- ✅ Use `Dir.mktmpdir` or `Tempfile.create`
+- ✅ Ensure proper cleanup (block form or ensure block)
+- ✅ Add test coverage for the temporary file/directory usage
+- ✅ Use trailing commas per CLAUDE.md
+- ✅ Verify tests pass with isolated temp directories
+
+**Common mistakes to avoid:**
+- ❌ Fixing the immediate issue but ignoring test coverage requirement
+- ❌ Adding code without trailing commas in di/ directories
+- ❌ Adding error boundary without telemetry
+- ❌ Fixing sleep but not verifying deterministic behavior
+- ❌ Not reading CLAUDE.md before making changes
+
+**Verification checklist after each fix:**
+- [ ] Read CLAUDE.md and applied all relevant rules
+- [ ] Fixed the specific issue identified in review
+- [ ] Added full test coverage (100% for di/ code)
+- [ ] Applied trailing commas in di/ and symbol_database/
+- [ ] Added error handling where needed (logging + telemetry)
+- [ ] No hardcoded /tmp paths introduced
+- [ ] No sleep introduced in tests
+- [ ] Tests pass locally
+- [ ] Committed with descriptive message
 
 ### Pattern: Review → Fix Cycle
 
@@ -1183,8 +1259,11 @@ When asked to fix multiple issues:
                      ↓
 ┌─────────────────────────────────────────────────┐
 │ 3. Apply Fixes (DO THIS, DON'T EXPLAIN)        │
+│    - Read CLAUDE.md for coding guidelines       │
 │    - Read the problematic code                  │
 │    - Make the necessary changes                 │
+│    - Add full test coverage                     │
+│    - Apply all CLAUDE.md rules                  │
 │    - Commit with descriptive message            │
 │    - Repeat for each issue                      │
 └─────────────────────────────────────────────────┘
