@@ -6,7 +6,7 @@ version: 0.2.0
 
 # PR Fix Tests
 
-This skill automatically fixes test failures in a pull request. Each fix is committed separately with a descriptive message, and all commits are pushed at the end.
+This skill automatically fixes test failures in a pull request. Each fix is committed separately with a descriptive message, and **all commits are automatically pushed to the PR branch**. The skill then continuously monitors CI and fixes any remaining failures.
 
 ## Overview
 
@@ -21,6 +21,16 @@ The skill automates the process of:
 8. Pushing all commits to the PR branch
 9. **Continuously monitoring CI status** (polling every minute)
 10. **Fixing any new or remaining test failures** until all tests pass
+
+## Default Behavior
+
+**IMPORTANT:** When invoked with a PR number or URL, this skill automatically:
+1. ✅ Commits each fix separately
+2. ✅ Pushes commits to the PR branch after each fix round
+3. ✅ Monitors CI continuously and fixes new failures
+4. ✅ No user confirmation required
+
+This is the **default behavior**. Fixes are committed and pushed automatically until all tests pass.
 
 ## When This Skill Applies
 

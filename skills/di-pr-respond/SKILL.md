@@ -12,6 +12,15 @@ This skill handles responding to review comments on pull requests in the `datado
 
 This skill systematically processes PR review comments, makes requested changes, finds and fixes similar issues throughout the codebase, and responds appropriately to each comment.
 
+## Default Behavior
+
+**IMPORTANT:** When invoked with a PR number or URL, this skill automatically:
+1. ✅ Commits each fix separately with descriptive messages
+2. ✅ Pushes all commits to the PR branch after addressing all comments
+3. ✅ No user confirmation required
+
+This is the **default behavior**. All fixes are committed and pushed automatically.
+
 ## When This Skill Applies
 
 Use this skill when:

@@ -6,7 +6,7 @@ version: 0.3.0
 
 # PR Fix Lint
 
-This skill automatically fixes non-test CI failures in a pull request, including linting, static analysis, and type checking issues. Each fix is committed separately with a descriptive message, and all commits are pushed at the end.
+This skill automatically fixes non-test CI failures in a pull request, including linting, static analysis, and type checking issues. Each fix is committed separately with a descriptive message, and **all commits are automatically pushed to the PR branch at the end**.
 
 ## Overview
 
@@ -19,6 +19,15 @@ The skill automates the process of:
 6. **Applying CLAUDE.md rules** - Ensuring fixes follow all guidelines
 7. Committing each fix with a descriptive message
 8. Pushing all commits to the PR branch
+
+## Default Behavior
+
+**IMPORTANT:** When invoked with a PR number or URL, this skill automatically:
+1. ✅ Commits each fix separately
+2. ✅ Pushes all commits to the PR branch
+3. ✅ No user confirmation required
+
+This is the **default behavior**. Fixes are committed and pushed automatically.
 
 ## When This Skill Applies
 
