@@ -1093,3 +1093,175 @@ Provide review feedback in this structure:
 - [ ] All CRITICAL issues resolved
 - [ ] Ready for approval
 ```
+
+## Follow-Up Actions After Review
+
+**IMPORTANT:** After providing the review, if you are asked to fix any issues you identified, **FIX THEM** rather than providing recommendations or comments.
+
+### When User Says "Fix X"
+
+When the user says things like:
+- "Fix the sleep in tests"
+- "Fix the skipped test"
+- "Add the missing error boundary"
+- "Fix the hardcoded /tmp path"
+- "Add the missing telemetry"
+
+**You must:**
+1. **Actually fix the code** - Make the necessary changes using Edit tool
+2. **Commit the fix** - Create a commit with descriptive message
+3. **Verify the fix** - Confirm the issue is resolved
+
+**DO NOT:**
+- Just explain what needs to be fixed
+- Provide a code snippet without applying it
+- Say "you should do X" or "recommend changing Y"
+- Wait for further instructions
+
+### Example Follow-Up Flow
+
+**Review identifies issue:**
+```
+❌ CRITICAL: Sleep in tests
+
+File: spec/datadog/di/worker_spec.rb:78
+Line: sleep 0.5
+
+This makes tests flaky. Replace with deterministic synchronization.
+```
+
+**User says:** "Fix the sleep"
+
+**Correct response:**
+1. Read the test file
+2. Identify the problematic sleep call and surrounding context
+3. Replace sleep with proper synchronization (Queue, ConditionVariable, etc.)
+4. Commit the change:
+   ```bash
+   git commit -m "Replace sleep with queue-based synchronization in worker_spec.rb
+
+   Address review feedback: Remove non-deterministic sleep and use
+   queue.pop with timeout for deterministic test synchronization.
+
+   Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+   ```
+
+**Incorrect response:**
+- "You should replace the sleep with a Queue..." ❌
+- "I recommend using ConditionVariable..." ❌
+- "Here's how you can fix it: [code snippet]" ❌
+
+### Fixing Multiple Issues
+
+When asked to fix multiple issues:
+
+```bash
+# User: "Fix all the sleep calls"
+# Your actions:
+1. Read all test files with sleep
+2. Fix each sleep call with proper synchronization
+3. Commit each file separately with descriptive messages
+4. Report what was fixed
+```
+
+### Pattern: Review → Fix Cycle
+
+```
+┌─────────────────────────────────────────────────┐
+│ 1. Perform Review                               │
+│    - Identify all issues                        │
+│    - Categorize as CRITICAL or Additional       │
+│    - Provide detailed feedback                  │
+└─────────────────────────────────────────────────┘
+                     ↓
+┌─────────────────────────────────────────────────┐
+│ 2. User Requests Fix                            │
+│    "Fix the skipped tests"                      │
+│    "Add error boundaries"                       │
+│    "Fix all the issues you found"               │
+└─────────────────────────────────────────────────┘
+                     ↓
+┌─────────────────────────────────────────────────┐
+│ 3. Apply Fixes (DO THIS, DON'T EXPLAIN)        │
+│    - Read the problematic code                  │
+│    - Make the necessary changes                 │
+│    - Commit with descriptive message            │
+│    - Repeat for each issue                      │
+└─────────────────────────────────────────────────┘
+                     ↓
+┌─────────────────────────────────────────────────┐
+│ 4. Report Completion                            │
+│    "Fixed X issues:"                            │
+│    "- Removed sleep from worker_spec.rb:78"     │
+│    "- Added error boundary to probe_manager..."│
+│    "- Replaced /tmp path with Dir.mktmpdir..." │
+└─────────────────────────────────────────────────┘
+```
+
+### Scope of Fixes
+
+**Always fix:**
+- Issues you identified in your review
+- Code quality problems found during review
+- Test issues (skipped tests, sleep calls, coverage gaps)
+- Missing error boundaries or telemetry
+- Hardcoded /tmp paths
+- Repository guideline violations
+
+**Use judgment for:**
+- Architectural changes (may need discussion first)
+- Breaking changes (discuss impact)
+- Large refactorings (may need planning)
+
+**When in doubt:**
+- If the fix is straightforward and clear from your review → Fix it
+- If the fix requires architectural decisions → Discuss first
+- If unclear what the user wants fixed → Ask for clarification
+
+### Commit Messages for Review Fixes
+
+Format:
+```
+Fix <issue> found in review
+
+Address review feedback: <what you fixed and why>
+
+<List of specific changes>
+- Fixed in <file>:<line>
+- Fixed in <file>:<line>
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+Examples:
+```
+Fix skipped tests in probe_spec.rb
+
+Address review feedback: Enable and fix previously skipped tests
+for probe registration and error handling.
+
+- Fixed probe registration test (was skipped due to race condition)
+- Added proper synchronization with Queue
+- Fixed error handling test with correct expectations
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+```
+Add missing error boundary to TracePoint callback
+
+Address review feedback: Wrap probe.execute in error boundary to
+prevent exceptions from propagating to customer code.
+
+- Added rescue block with DEBUG logging
+- Added telemetry reporting for errors
+- Added test coverage for error boundary
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+### Summary
+
+**The key principle:** After a review, when told to fix something, **be proactive and fix it**. Don't wait, don't explain, don't recommend. Read the code, make the change, commit it, and report what you did.
+
+This makes the review process efficient: review → fix → done, rather than review → explain → wait → fix → done.
