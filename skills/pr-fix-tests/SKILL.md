@@ -465,19 +465,35 @@ Test checks: 12 passed, 0 failed, 0 running
 
 Before pushing, verify fixes work:
 
+**IMPORTANT: Prefer targeted test runs over full suite**
+
+Running the full `spec:main` suite takes a long time. Always prefer:
+1. **Individual test examples** (specific line number)
+2. **Single test files** (one spec file)
+3. **Component-scoped tests** (spec:di, spec:telemetry, etc.)
+
+Only run the full `spec:main` suite if you've made widespread changes affecting multiple components.
+
 **Ruby (RSpec):**
 ```bash
-# Run all core tests (dd-trace-rb primary method)
+# PREFERRED: Run specific test example (fastest)
+bundle exec rspec spec/datadog/di/probe_spec.rb:45
+
+# PREFERRED: Run specific test file
+bundle exec rspec spec/datadog/di/probe_spec.rb
+
+# PREFERRED: Run component-scoped tests (for DI changes)
+bundle exec rspec spec/datadog/di/
+
+# PREFERRED: Run tests matching a pattern
+bundle exec rspec spec/datadog/di/ -e "probe execution"
+
+# LAST RESORT: Run all core tests (SLOW - only if necessary)
 bundle exec rake spec:main
-
-# Run specific test file (direct RSpec also works)
-bundle exec rspec spec/path/to/test_spec.rb
-
-# Run specific test line
-bundle exec rspec spec/path/to/test_spec.rb:45
 
 # Note: dd-trace-rb uses rake tasks as the primary test entry point
 # CI runs: bundle exec rake spec:main, spec:redis, spec:profiling, etc.
+# But for local verification, prefer targeted runs for speed
 ```
 
 **JavaScript (Jest):**
@@ -836,7 +852,7 @@ Test checks: 12 passed, 0 failed, 0 running
 **Fixes don't resolve CI failure:**
 - Commit what was fixed anyway
 - Report: "⚠️ Fixes applied but some tests may still fail. Manual review needed."
-- Suggest running full test suite: "Run `bundle exec rake spec:main` to verify locally"
+- Suggest running affected tests: "Run `bundle exec rspec spec/path/to/affected_spec.rb` or `bundle exec rspec spec/datadog/component/` to verify locally"
 
 **Protected branch (can't push):**
 - Report error with branch protection info
@@ -931,12 +947,13 @@ run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
   jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 gh run view $run_id --log
 
-# Run tests locally
-bundle exec rake spec:main                        # Ruby - all core tests (dd-trace-rb primary)
-bundle exec rspec spec/path/to/test_spec.rb:45    # Ruby - specific line (also works)
-bundle exec rspec spec/path/to/test_spec.rb       # Ruby - entire file (also works)
-npm test path/to/test.test.js                     # JavaScript
-pytest tests/path/to/test_file.py::test_name      # Python
+# Run tests locally (prefer targeted runs for speed)
+bundle exec rspec spec/path/to/test_spec.rb:45    # Ruby - specific line (FASTEST, preferred)
+bundle exec rspec spec/path/to/test_spec.rb       # Ruby - entire file (preferred)
+bundle exec rspec spec/datadog/di/                # Ruby - component directory (preferred)
+bundle exec rake spec:main                        # Ruby - all core tests (SLOW, avoid unless necessary)
+npm test path/to/test.test.js                     # JavaScript - specific file
+pytest tests/path/to/test_file.py::test_name      # Python - specific test
 
 # Commit fix with heredoc (proper formatting)
 git commit -m "$(cat <<'EOF'
@@ -1028,7 +1045,8 @@ done
 2. **Descriptive commit messages** - Clearly state what test was fixed and why
 3. **Always include test location** - File and line number in commit message
 4. **Verify fixes locally** - Run tests before pushing when possible
-5. **Fix root cause, not symptoms** - Don't just change assertions to pass
+5. **Run targeted tests, not full suite** - Prefer specific test examples, single files, or component directories (spec/datadog/di/) over spec:main which is slow
+6. **Fix root cause, not symptoms** - Don't just change assertions to pass
 6. **Minimal changes** - Don't refactor or add features while fixing tests
 7. **Include Co-Authored-By** - Credit Claude in all commits
 8. **Read failure logs carefully** - Understand before fixing
@@ -1043,7 +1061,7 @@ done
 ## Safety Checks
 
 Before pushing:
-- Verify all fixed tests pass locally
+- Verify all fixed tests pass locally (use targeted test runs for speed)
 - Check no unrelated files were modified
 - Confirm changes are minimal and focused
 - Review `git diff origin/branch HEAD` for unexpected changes
@@ -1053,6 +1071,7 @@ Before pushing:
 
 - Test failures often indicate bugs in the source code, not just test issues
 - Some test failures require understanding business logic
+- **Prefer targeted test runs** - Run specific examples, files, or component directories instead of the full spec:main suite which takes a long time
 - **Flaky tests require root cause investigation** - Never mask with sleep(), retries, or skipping
 - **Intermittent failures are real failures** - Investigate why they happen inconsistently
 - If a fix seems too complex or risky, report for manual review
