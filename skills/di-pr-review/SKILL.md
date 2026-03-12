@@ -1053,7 +1053,6 @@ grep -rn "'/tmp/\|\"\/tmp/" lib/ spec/ | grep -v "Dir\.tmpdir"
 - `allow(File).to receive(:open).with('/tmp/...')` - **Mocks/stubs (not exempt!)**
 - `TEMP_PATH = '/tmp/...'` - **Constants (not exempt!)**
 - `path = '/tmp/...'` - **Variables (not exempt!)**
-- `"Write to /tmp/..."` - **Documentation strings (not exempt unless showing what NOT to do!)**
 - Any string literal containing `/tmp/` in ANY context
 
 ### Correct Patterns
@@ -1154,11 +1153,13 @@ When hardcoded /tmp paths are found:
    Dir.tmpdir  # Returns system temp directory path
    ```
 
-2. **Comments explaining NOT to use /tmp** (must include "don't", "avoid", "not", or "instead"):
+2. **Comments explicitly warning against /tmp** (must include "don't", "avoid", "not", or "instead"):
    ```ruby
    # Don't use /tmp directly, use Dir.mktmpdir instead
-   # Avoid hardcoded /tmp paths
+   # Avoid hardcoded /tmp paths - use Tempfile.create instead
    ```
+
+   Note: This is ONLY for warnings/guidance, not for examples or explanations of behavior.
 
 **Everything else is a violation. No exceptions. Including:**
 
@@ -1184,17 +1185,6 @@ end
 # VIOLATION - doesn't matter that it's "just a string"
 EXCLUDED_PATHS = ['/tmp', '/var/tmp']  # WRONG
 EXCLUDED_PATHS = [Dir.tmpdir]  # CORRECT
-```
-
-❌ **Documentation examples** - Still a violation unless showing what NOT to do:
-```ruby
-# VIOLATION - example code should be correct
-# Example usage:
-# file = File.open('/tmp/cache.json')  # WRONG
-
-# CORRECT - showing what NOT to do:
-# Don't do this: file = File.open('/tmp/cache.json')
-# Do this instead: Tempfile.create('cache.json') { |f| ... }
 ```
 
 **Never acceptable:**
