@@ -270,7 +270,7 @@ gh pr view <PR_NUMBER>
 # Get review comments as JSON (only non-outdated)
 # Note: outdated can be false OR null for current comments
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq '[.[] | select(.outdated != true)]'
+  jq '[.[] | select(.outdated == true | not)]'
 ```
 
 **CRITICAL: Ignore outdated comments**
@@ -291,7 +291,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
 # Filter out outdated comments using jq
 # Note: outdated can be false OR null for current comments
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq '[.[] | select(.outdated != true)]' > /tmp/current_comments.json
+  jq '[.[] | select(.outdated == true | not)]' > /tmp/current_comments.json
 
 # Only process non-outdated comments
 cat /tmp/current_comments.json

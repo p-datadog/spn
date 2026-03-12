@@ -1495,7 +1495,7 @@ Outdated comments are GitHub PR review comments that were made on previous versi
 # Get only current (non-outdated) comments
 # Note: outdated can be false OR null for current comments
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq '[.[] | select(.outdated != true)]'
+  jq '[.[] | select(.outdated == true | not)]'
 
 # See which comments are outdated
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
@@ -1546,13 +1546,13 @@ gh pr checkout <PR_NUMBER>
 # View current (non-outdated) review comments
 # Note: outdated can be false OR null for current comments
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq '[.[] | select(.outdated != true) | {path, line, body}]'
+  jq '[.[] | select(.outdated == true | not) | {path, line, body}]'
 
 # Count current vs outdated comments
 # Note: outdated can be false OR null for current comments
 echo "Current comments:"
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq '[.[] | select(.outdated != true)] | length'
+  jq '[.[] | select(.outdated == true | not)] | length'
 echo "Outdated comments (ignore these):"
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
   jq '[.[] | select(.outdated == true)] | length'
