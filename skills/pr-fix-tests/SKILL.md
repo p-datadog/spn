@@ -104,6 +104,29 @@ When a test fails inconsistently or shows signs of being flaky:
 
 ## Workflow
 
+**Preferred approach for test failure analysis:**
+
+1. **Always try JUnit artifacts FIRST** (Step 3.5)
+   - Fast, structured data
+   - Easy to parse
+   - Complete failure information
+
+2. **Fall back to log parsing** (Step 4) only if:
+   - JUnit artifacts not available
+   - Artifact download fails
+   - Non-RSpec frameworks
+
+**📋 Complete Workflow:**
+
+1. Read repository guidelines (CLAUDE.md) and review requirements
+2. Fetch PR and check CI status
+3. Identify failed test jobs
+4. **→ Download and analyze JUnit artifacts** (preferred)
+5. → Fall back to log parsing (if artifacts unavailable)
+6. Fix test failures (commit separately)
+7. Push commits and monitor CI
+8. Repeat until all tests pass
+
 ### Step 1: Read Repository Guidelines and Review Requirements
 
 **CRITICAL:** Before making any fixes, read both the repository's coding guidelines and the review requirements.
@@ -177,7 +200,267 @@ Look for failed checks matching these patterns:
 - "Sorbet", "mypy", "type-check"
 - Pure formatting/linting jobs
 
-### Step 4: Analyze Each Test Failure
+### Step 3.5: Download and Analyze JUnit Artifacts (Preferred Method)
+
+**⚠️ IMPORTANT: Always try JUnit artifacts FIRST before parsing logs.**
+
+JUnit XML artifacts provide structured test failure data that's much easier to parse than unstructured logs. This is the PREFERRED method for analyzing test failures.
+
+#### Why JUnit Artifacts are Better
+
+**JUnit XML provides:**
+- ✅ Structured failure data (easy to parse)
+- ✅ All failures in one place (no log searching)
+- ✅ Exact test names and locations
+- ✅ Complete failure messages and stack traces
+- ✅ Test timing information
+- ✅ Faster than parsing multi-megabyte logs
+
+**Raw logs require:**
+- ❌ Parsing unstructured text
+- ❌ Searching through megabytes of output
+- ❌ Handling different log formats
+- ❌ Finding test names in various formats
+- ❌ Slow and error-prone
+
+#### How JUnit Artifacts Work in dd-trace-rb
+
+**During test runs:**
+1. RSpec configured to generate JUnit XML (via `RspecJunitFormatter`)
+2. Each test batch creates one XML file in `tmp/rspec/`
+3. Files uploaded as GitHub Actions artifacts with names like `junit-ruby-27-standard-6`
+
+**Artifact naming pattern:** `junit-{ruby-version}-{job-type}-{batch-number}`
+
+Examples:
+- `junit-ruby-34-standard-1`
+- `junit-jruby-93-misc-2`
+- `junit-ruby-27-standard-6`
+
+#### Step-by-Step: Download and Parse JUnit Artifacts
+
+**1. Get run ID from failed check:**
+```bash
+# Extract run ID from check link
+run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
+  jq -r '.[] | select(.name == "<CHECK_NAME>") | .link' | \
+  grep -oP 'runs/\K[0-9]+')
+
+echo "Run ID: $run_id"
+```
+
+**2. List available JUnit artifacts:**
+```bash
+# List all junit artifacts for this run
+gh api /repos/DataDog/dd-trace-rb/actions/runs/$run_id/artifacts --paginate | \
+  jq -r '.artifacts[] | select(.name | startswith("junit-")) | "\(.name) (\(.size_in_bytes) bytes)"'
+```
+
+**Example output:**
+```
+junit-ruby-27-standard-6 (211374 bytes)
+junit-ruby-34-standard-1 (458921 bytes)
+```
+
+**3. Download all JUnit artifacts:**
+```bash
+# Create temp directory for artifacts
+temp_dir=$(mktemp -d)
+cd "$temp_dir"
+
+# Download all junit artifacts for this run
+for artifact in $(gh api /repos/DataDog/dd-trace-rb/actions/runs/$run_id/artifacts --paginate | \
+  jq -r '.artifacts[] | select(.name | startswith("junit-")) | .name'); do
+  echo "Downloading $artifact..."
+  gh run download $run_id --repo DataDog/dd-trace-rb --name "$artifact"
+done
+
+echo "Downloaded to: $temp_dir"
+ls -lh
+```
+
+**4. Find XML files containing failures:**
+```bash
+# Find all XML files with failures
+for xml in *.xml **/*.xml; do
+  [ -f "$xml" ] || continue
+  failures=$(grep -c '<failure' "$xml" 2>/dev/null || echo 0)
+  errors=$(grep -c '<error' "$xml" 2>/dev/null || echo 0)
+
+  if [ "$failures" -gt 0 ] || [ "$errors" -gt 0 ]; then
+    echo "$failures failures, $errors errors: $xml"
+  fi
+done
+```
+
+**5. Extract failure details from XML:**
+```bash
+# Function to parse JUnit XML failures
+parse_junit_failures() {
+  local xml_file="$1"
+
+  echo "=== Failures in $xml_file ==="
+
+  # Extract test suite info
+  grep '<testsuite' "$xml_file" | head -1
+
+  # Extract each failure
+  grep -A 20 '<failure' "$xml_file" | while read -r line; do
+    if [[ "$line" =~ '<testcase' ]]; then
+      # Extract test name and file
+      name=$(echo "$line" | grep -oP 'name="\K[^"]+')
+      file=$(echo "$line" | grep -oP 'file="\K[^"]+')
+      echo ""
+      echo "FAILED TEST: $name"
+      echo "FILE: $file"
+    elif [[ "$line" =~ '<failure' ]]; then
+      # Extract failure message
+      message=$(echo "$line" | grep -oP 'message="\K[^"]+')
+      type=$(echo "$line" | grep -oP 'type="\K[^"]+')
+      echo "ERROR TYPE: $type"
+      echo "MESSAGE: $message"
+    elif [[ "$line" =~ '</failure>' ]]; then
+      echo "---"
+    else
+      # Stack trace line
+      echo "$line"
+    fi
+  done
+}
+
+# Parse all XML files with failures
+for xml in *.xml **/*.xml; do
+  [ -f "$xml" ] || continue
+  if grep -q '<failure' "$xml" 2>/dev/null; then
+    parse_junit_failures "$xml"
+  fi
+done
+```
+
+**6. Group failures by pattern:**
+```bash
+# Extract just failure messages to identify patterns
+echo "=== Failure Patterns ==="
+grep -h -oP 'message="\K[^"]+' *.xml **/*.xml 2>/dev/null | sort | uniq -c | sort -rn
+```
+
+**Example output:**
+```
+     11 Test script produced unexpected output: /.../scope_context.rb:218: warning: assigned but unused variable - e
+      3 Timeout::Error: execution expired after 5 seconds
+      1 Expected 3 to equal 4
+```
+
+#### JUnit XML Structure Reference
+
+**Test suite container:**
+```xml
+<testsuite name="spec.loading_spec" tests="20" failures="11" errors="0" time="7.234">
+```
+
+**Passing test:**
+```xml
+<testcase classname="spec.loading_spec"
+          name="loading of products datadog/tracing loads successfully"
+          file="./spec/loading_spec.rb"
+          time="0.352308">
+</testcase>
+```
+
+**Failing test:**
+```xml
+<testcase classname="spec.loading_spec"
+          name="loading of products datadog/tracing produces no output"
+          file="./spec/loading_spec.rb"
+          time="0.352308">
+  <failure message="Test script produced unexpected output: warning: unused variable - e"
+           type="RuntimeError">
+Failure/Error: raise("Test script produced unexpected output: #{out}") unless out.empty?
+
+RuntimeError:
+  Test script produced unexpected output: /.../scope_context.rb:218: warning: assigned but unused variable - e
+./spec/loading_spec.rb:70:in `block (4 levels) in &lt;top (required)&gt;'
+  </failure>
+</testcase>
+```
+
+**Key fields:**
+- `<testsuite>`: Group of tests (tests, failures, errors, time)
+- `<testcase>`: Individual test (classname, name, file, time)
+- `<failure>`: Failure details (message, type, + stack trace in inner text)
+
+#### When JUnit Artifacts are NOT Available
+
+**Fallback to log parsing only if:**
+1. No JUnit artifacts found in the run
+2. Artifact download fails
+3. XML files are empty or corrupted
+
+**In these cases, proceed to Step 4 (log analysis).**
+
+#### Real Example: Ruby 2.7 Loading Test Failures
+
+**Scenario:** 11 identical test failures in loading_spec.rb
+
+**Using JUnit artifacts (FAST):**
+```bash
+# Download artifact
+gh run download 22979950861 --name junit-ruby-27-standard-6
+
+# Find failures (takes 2 seconds)
+grep '<failure' *.xml | wc -l
+# Output: 11
+
+# Extract pattern (takes 1 second)
+grep -oP 'message="\K[^"]+' *.xml | head -1
+# Output: Test script produced unexpected output: /.../scope_context.rb:218: warning: assigned but unused variable - e
+
+# Identify fix location immediately
+grep 'scope_context.rb:218' *.xml
+```
+
+**Without JUnit artifacts (SLOW):**
+```bash
+# Download massive log file
+gh run view 22979950861 --log > /tmp/log.txt  # 5MB, takes 30 seconds
+
+# Search for failures (takes 20 seconds)
+grep -n "FAILED\|Error\|Failure" /tmp/log.txt | wc -l
+# Output: 847 lines (mostly noise)
+
+# Try to find actual test failures (manual searching through 847 lines)
+# Parse different test output formats
+# Extract stack traces from unstructured text
+# Identify which failures are related
+# Manually trace back to source file
+```
+
+**Result:** JUnit analysis takes 3 seconds vs 5+ minutes of log parsing.
+
+#### Checklist: Use JUnit Artifacts First
+
+Before parsing logs, **ALWAYS:**
+- [ ] Extract run ID from failed check
+- [ ] List artifacts with `gh api .../artifacts`
+- [ ] Look for `junit-*` artifact names
+- [ ] Download JUnit artifacts if available
+- [ ] Parse XML for failure details
+- [ ] Group failures by pattern
+- [ ] Identify root cause from structured data
+
+**Only parse logs if JUnit artifacts are not available.**
+
+### Step 4: Analyze Test Failures from Logs (Fallback Method)
+
+**⚠️ Use this method ONLY if JUnit artifacts are not available (Step 3.5).**
+
+**When to use log parsing:**
+- No JUnit artifacts found in Step 3.5
+- JUnit artifact download failed
+- XML files are empty or corrupted
+- Non-RSpec test frameworks without JUnit output
+
+**Prefer Step 3.5 (JUnit artifacts) whenever possible - it's faster and more reliable.**
 
 For each identified test failure:
 
