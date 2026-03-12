@@ -60,14 +60,14 @@ PRs with the "no-restart" label are intentionally excluded from automatic CI job
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 
 # Get detailed check information with JSON output
-gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,status,conclusion,detailsUrl
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state,detailsUrl
 ```
 
 ### Step 4: Identify Failed Jobs
 
 Look for checks where:
 - `status` = "completed"
-- `conclusion` = "failure"
+- `state` = "FAILURE"
 
 ### Step 5: Investigate Failure Reasons
 
@@ -140,12 +140,12 @@ echo "---------|-----------------------------------------------------|----------
 **Detection:**
 ```bash
 # Check if only "All Required Checks Passed" is failing
-checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,conclusion)
+checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state)
 
 # Parse to see if only this check failed
-echo "$checks" | jq 'map(select(.conclusion == "failure")) | length'
+echo "$checks" | jq 'map(select(.state == "FAILURE")) | length'
 # If count is 1, check if it's the "All Required Checks Passed" job
-echo "$checks" | jq -r 'map(select(.conclusion == "failure"))[0].name'
+echo "$checks" | jq -r 'map(select(.state == "FAILURE"))[0].name'
 ```
 
 **Immediate restart:**
@@ -187,10 +187,10 @@ When the skill is invoked:
      fi
 
      # Get check status
-     checks=$(gh pr checks $pr_num --repo DataDog/dd-trace-rb --json name,status,conclusion,workflowName)
+     checks=$(gh pr checks $pr_num --repo DataDog/dd-trace-rb --json name,state,workflowName)
 
      # Find failed checks
-     failed=$(echo "$checks" | jq -r '.[] | select(.conclusion == "failure")')
+     failed=$(echo "$checks" | jq -r '.[] | select(.state == "FAILURE")')
 
      if [ -z "$failed" ]; then
        echo "  ✅ All checks passing"
@@ -202,9 +202,9 @@ When the skill is invoked:
      restart_count=0
 
      # Check for "All Required Checks Passed" special case
-     failed_count=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure")] | length')
+     failed_count=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE")] | length')
      if [ "$failed_count" -eq 1 ]; then
-       failed_name=$(echo "$checks" | jq -r '[.[] | select(.conclusion == "failure")][0].name')
+       failed_name=$(echo "$checks" | jq -r '[.[] | select(.state == "FAILURE")][0].name')
        if [[ "$failed_name" == *"Required"*"Checks"* ]] || [[ "$failed_name" == *"All"*"green"* ]]; then
          echo "  🔄 Only 'All Required Checks Passed' failing, restarting immediately"
          # Get run ID and restart
@@ -418,7 +418,7 @@ gh pr list --repo DataDog/dd-trace-rb --label "p-datadog" --state open
 gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb
 
 # Get check details JSON
-gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,status,conclusion
+gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state
 
 # Get workflow runs for commit
 gh api repos/DataDog/dd-trace-rb/commits/<SHA>/check-runs

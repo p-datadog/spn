@@ -684,17 +684,17 @@ while true; do
   echo "Time: $(date)"
 
   # Get current CI status
-  checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion,link,detailsUrl | \
+  checks=$(gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
     jq '[.[] | select(.name | test("test|spec|e2e|integration|build.*test"; "i"))]')
 
   # Count running checks
   running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED" or .state == "PENDING")] | length')
 
   # Count failed test checks
-  failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
+  failed=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE")] | length')
 
   # Count successful test checks
-  passed=$(echo "$checks" | jq '[.[] | select(.conclusion == "SUCCESS")] | length')
+  passed=$(echo "$checks" | jq '[.[] | select(.state == "SUCCESS")] | length')
 
   echo "Test checks: $passed passed, $failed failed, $running running"
 
@@ -711,7 +711,7 @@ while true; do
     echo "Found $failed test failure(s), analyzing..."
 
     # Get list of failed test checks
-    failed_checks=$(echo "$checks" | jq -r '.[] | select(.conclusion == "FAILURE") | .name')
+    failed_checks=$(echo "$checks" | jq -r '.[] | select(.state == "FAILURE") | .name')
 
     echo "Failed checks:"
     echo "$failed_checks"
@@ -741,7 +741,7 @@ done
 6. **Exit when all pass** - Stop monitoring when all test checks are successful
 
 **Stopping conditions:**
-- ✅ All test checks pass (conclusion == "SUCCESS")
+- ✅ All test checks pass (state == "SUCCESS")
 - ⚠️ Manual intervention needed (if fixes don't resolve failures after 3 rounds)
 - ⚠️ User cancels the monitoring
 
@@ -906,11 +906,11 @@ When the skill is invoked with a PR number:
      echo "=== CI Status Check #$iteration ==="
 
      # Get test check status
-     checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+     checks=$(gh pr checks <PR_NUMBER> --json name,state | \
        jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))]')
 
      running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED")] | length')
-     failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
+     failed=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE")] | length')
 
      # Wait if still running
      if [ "$running" -gt 0 ]; then
@@ -1307,32 +1307,32 @@ git push origin HEAD
 # CI Monitoring Commands
 # ============================================
 
-# Check current CI status with state and conclusion
-gh pr checks <PR_NUMBER> --json name,state,conclusion,link,detailsUrl
+# Check current CI status
+gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl
 
 # Get test checks only (filter by name pattern)
-gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+gh pr checks <PR_NUMBER> --json name,state | \
   jq '[.[] | select(.name | test("test|spec|e2e|integration|build.*test"; "i"))]'
 
 # Count running test checks
-gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+gh pr checks <PR_NUMBER> --json name,state | \
   jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
       [.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED" or .state == "PENDING")] | length'
 
 # Count failed test checks
-gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+gh pr checks <PR_NUMBER> --json name,state | \
   jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
-      [.[] | select(.conclusion == "FAILURE")] | length'
+      [.[] | select(.state == "FAILURE")] | length'
 
 # Count passed test checks
-gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+gh pr checks <PR_NUMBER> --json name,state | \
   jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
-      [.[] | select(.conclusion == "SUCCESS")] | length'
+      [.[] | select(.state == "SUCCESS")] | length'
 
 # List names of failed test checks
-gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+gh pr checks <PR_NUMBER> --json name,state | \
   jq -r '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))] |
-         [.[] | select(.conclusion == "FAILURE")] | .[].name'
+         [.[] | select(.state == "FAILURE")] | .[].name'
 
 # Check PR status (to detect if merged or closed)
 gh pr view <PR_NUMBER> --json state,merged | jq -r '.state, .merged'
@@ -1342,12 +1342,12 @@ iteration=1
 while true; do
   echo "=== Check #$iteration at $(date) ==="
 
-  checks=$(gh pr checks <PR_NUMBER> --json name,state,conclusion | \
+  checks=$(gh pr checks <PR_NUMBER> --json name,state | \
     jq '[.[] | select(.name | test("test|spec|e2e|integration"; "i"))]')
 
   running=$(echo "$checks" | jq '[.[] | select(.state == "IN_PROGRESS" or .state == "QUEUED")] | length')
-  failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "FAILURE")] | length')
-  passed=$(echo "$checks" | jq '[.[] | select(.conclusion == "SUCCESS")] | length')
+  failed=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE")] | length')
+  passed=$(echo "$checks" | jq '[.[] | select(.state == "SUCCESS")] | length')
 
   echo "Status: $passed passed, $failed failed, $running running"
 
