@@ -964,6 +964,19 @@ When line probe test files are modified incorrectly:
 
 **Critical Requirement:** Any code that needs temporary files or directories must use `tmpdir` or similar functions to create isolated temporary locations.
 
+**⚠️ ANTI-RATIONALIZATION WARNING:**
+
+This rule is absolute. You will be tempted to rationalize violations as "different" or "special":
+- ❌ "This is just a test assertion, not actually using /tmp"
+- ❌ "This is testing filter logic, so it's an exception"
+- ❌ "This is just a string literal, not a real path"
+- ❌ "This is documentation, so it doesn't count"
+- ❌ "This is mocking/stubbing, not real file operations"
+
+**All of these are still violations.** The rule exists to prevent exactly this rationalization.
+
+**If you find yourself thinking "but this is different because...", STOP. Flag it as a violation.**
+
 ### Why Hardcoded /tmp Paths Are Problematic
 
 **Security issues:**
@@ -1002,30 +1015,46 @@ end
 
 ### How to Check for Hardcoded /tmp Paths
 
-**Search for the patterns:**
+**Search for ALL occurrences - do not skip any:**
 
 ```bash
-# Find hardcoded /tmp paths in Ruby code
-grep -rn "'/tmp/" lib/ spec/
-grep -rn '"/tmp/' lib/ spec/
+# Find ALL hardcoded /tmp paths (most comprehensive)
+grep -rn "'/tmp/\|\"\/tmp/" lib/ spec/
 
-# Find File operations with /tmp
+# This catches ALL of:
+# - File operations: File.write('/tmp/foo')
+# - Test assertions: expect(x).to eq('/tmp/foo')
+# - Mocks/stubs: allow(File).to receive(:open).with('/tmp/foo')
+# - String literals: path = '/tmp/cache'
+# - Constants: TEMP_DIR = '/tmp/data'
+# - Documentation: "Save to /tmp/output.json"
+
+# Find specific operations (use these for double-checking)
 grep -rn "File\.\(write\|read\|open\).*['\"]\/tmp\/" lib/ spec/
-
-# Find FileUtils operations with /tmp
 grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
-
-# Find Dir operations with /tmp
 grep -rn "Dir\..*['\"]\/tmp\/" lib/ spec/
+
+# Find in test assertions (commonly rationalized away)
+grep -rn "expect.*['\"]\/tmp\/" spec/
+grep -rn "allow.*['\"]\/tmp\/" spec/
+grep -rn "stub.*['\"]\/tmp\/" spec/
+
+# After finding violations, exclude only Dir.tmpdir calls
+grep -rn "'/tmp/\|\"\/tmp/" lib/ spec/ | grep -v "Dir\.tmpdir"
 ```
 
-**Common patterns to flag:**
-- `'/tmp/anything'` or `"/tmp/anything"`
-- `File.write('/tmp/...')`
-- `File.open('/tmp/...')`
-- `FileUtils.mkdir_p('/tmp/...')`
-- `Dir.chdir('/tmp/...')`
-- Any string literal containing `/tmp/`
+**Common patterns to flag (ALL are violations):**
+- `'/tmp/anything'` or `"/tmp/anything"` - Any string literal
+- `File.write('/tmp/...')` - File operations
+- `File.open('/tmp/...')` - File operations
+- `FileUtils.mkdir_p('/tmp/...')` - Directory operations
+- `Dir.chdir('/tmp/...')` - Directory operations
+- `expect(result).to eq('/tmp/...')` - **Test assertions (not exempt!)**
+- `allow(File).to receive(:open).with('/tmp/...')` - **Mocks/stubs (not exempt!)**
+- `TEMP_PATH = '/tmp/...'` - **Constants (not exempt!)**
+- `path = '/tmp/...'` - **Variables (not exempt!)**
+- `"Write to /tmp/..."` - **Documentation strings (not exempt unless showing what NOT to do!)**
+- Any string literal containing `/tmp/` in ANY context
 
 ### Correct Patterns
 
@@ -1116,29 +1145,70 @@ When hardcoded /tmp paths are found:
 
 ### Exceptions
 
-**The only acceptable /tmp references are:**
+**CRITICAL: Do not rationalize your way around this rule. If you find yourself thinking "but this is different because...", you are probably wrong.**
 
-1. **Documentation or comments** explaining why NOT to use /tmp:
+**The ONLY acceptable /tmp references are:**
+
+1. **The exact string `Dir.tmpdir`** (reading system temp directory):
+   ```ruby
+   Dir.tmpdir  # Returns system temp directory path
+   ```
+
+2. **Comments explaining NOT to use /tmp** (must include "don't", "avoid", "not", or "instead"):
    ```ruby
    # Don't use /tmp directly, use Dir.mktmpdir instead
+   # Avoid hardcoded /tmp paths
    ```
 
-2. **Testing tmpdir itself** (rare):
-   ```ruby
-   # Testing that tmpdir creates directories correctly
-   expect(Dir.mktmpdir('test')).to start_with(Dir.tmpdir)
-   ```
+**Everything else is a violation. No exceptions. Including:**
 
-3. **Reading system temp dir path** (not writing):
-   ```ruby
-   Dir.tmpdir  # Returns system temp directory
-   ```
+❌ **Test assertions with /tmp strings** - Still a violation:
+```ruby
+# VIOLATION - even though it's "just testing"
+expect(result).to eq('/tmp/foo')
+expect(path).to include('/tmp/')
+allow(File).to receive(:write).with('/tmp/test.txt', anything)
+```
+
+❌ **"Testing tmpdir functionality"** - Still a violation unless using `Dir.tmpdir`:
+```ruby
+# VIOLATION - testing filter logic doesn't exempt you
+it 'filters tmp paths' do
+  expect(filter('/tmp/test')).to be_filtered  # WRONG
+  expect(filter(File.join(Dir.tmpdir, 'test'))).to be_filtered  # CORRECT
+end
+```
+
+❌ **String literals in any context** - Still a violation:
+```ruby
+# VIOLATION - doesn't matter that it's "just a string"
+EXCLUDED_PATHS = ['/tmp', '/var/tmp']  # WRONG
+EXCLUDED_PATHS = [Dir.tmpdir]  # CORRECT
+```
+
+❌ **Documentation examples** - Still a violation unless showing what NOT to do:
+```ruby
+# VIOLATION - example code should be correct
+# Example usage:
+# file = File.open('/tmp/cache.json')  # WRONG
+
+# CORRECT - showing what NOT to do:
+# Don't do this: file = File.open('/tmp/cache.json')
+# Do this instead: Tempfile.create('cache.json') { |f| ... }
+```
 
 **Never acceptable:**
 - Writing to `/tmp/myapp/...`
 - Reading from `/tmp/cache/...`
 - Creating directories in `/tmp/specific_name/`
 - Any hardcoded path under `/tmp`
+- Test assertions checking for `/tmp/` paths
+- Test mocks stubbing `/tmp/` paths
+- String literals containing `/tmp/` paths
+- Constants or variables assigned `/tmp/` strings
+- **ANY OTHER USE YOU CAN THINK OF**
+
+**If you're unsure whether something is an exception, it's not. Flag it.**
 
 ### Feedback Template
 
