@@ -1501,6 +1501,24 @@ When reviewing a dd-trace-rb DI PR, verify:
 
 To review a dd-trace-rb dynamic instrumentation PR:
 
+**⚠️ CRITICAL: GitHub API Pagination**
+
+**You MUST use `--paginate` when fetching comments, or you will silently miss comments.**
+
+- GitHub API returns 30 items per page by default
+- Without `--paginate`, you only get the first 30 comments
+- Large PRs can have 60+ comments
+- **Missing comments means incomplete review - this causes silent failures**
+- Always verify: Log the comment count after fetching
+
+```bash
+# WRONG - Only gets first 30 comments
+gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments
+
+# CORRECT - Gets all comments
+gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
+```
+
 1. **Fetch the PR**: Use `gh pr view <number>` or `gh pr checkout <number>`
 2. **Read changed files**: Focus on new instrumentation code
 3. **Review existing comments** (if any):
@@ -1552,9 +1570,10 @@ Outdated comments are GitHub PR review comments that were made on previous versi
 
 **Via GitHub API:**
 ```bash
-# Get only current (non-outdated) comments
+# Get ALL current (non-outdated) comments with pagination
+# CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
-gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
   jq '[.[] | select(.outdated == true | not)]'
 
 # See which comments are outdated
@@ -1604,17 +1623,19 @@ end
 gh pr checkout <PR_NUMBER>
 
 # View current (non-outdated) review comments
+# CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
-gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
   jq '[.[] | select(.outdated == true | not) | {path, line, body}]'
 
 # Count current vs outdated comments
+# CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
 echo "Current comments:"
-gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
   jq '[.[] | select(.outdated == true | not)] | length'
 echo "Outdated comments (ignore these):"
-gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
   jq '[.[] | select(.outdated == true)] | length'
 
 # Check for skipped tests
