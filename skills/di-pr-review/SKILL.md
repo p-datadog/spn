@@ -295,6 +295,176 @@ Skipped tests create false confidence. This is blocking approval.
 - Mock time: `Timecop.freeze`, `travel_to` (for time-based logic only)
 - Explicit callbacks: `on_complete { queue.push(:done) }` (add callback to code)
 
+**CRITICAL: dd-trace-rb Test Suite Default - Flush Calls**
+
+**In dd-trace-rb, the default synchronization mechanism is flush calls, NOT sleep.**
+
+The test suite uses flush methods to ensure async operations complete:
+- `tracer.flush` - Flushes traces to backend
+- `writer.flush` - Flushes writer queue
+- `worker.flush` - Flushes worker queue
+- `buffer.flush` - Flushes buffer contents
+
+**When you see sleep after flush:**
+
+```ruby
+# SUSPICIOUS PATTERN - Investigate carefully
+tracer.flush
+sleep 0.1  # Why is this needed?
+expect(backend.traces).to include(expected_trace)
+```
+
+**Required analysis:**
+
+1. **First, investigate if sleep is needed at all:**
+   - Try removing the sleep - does the test still pass?
+   - If test passes without sleep, **DEMAND REMOVAL** - the sleep is cargo-culted
+   - If test fails without sleep, proceed to step 2
+
+2. **If flush alone is insufficient, require clear explanation:**
+   - **WHY is flush insufficient?** Provide specific technical reason
+   - **PROOF:** Show test failure without sleep (stack trace, timing info)
+   - **ROOT CAUSE:** What async operation is flush not waiting for?
+
+3. **Then suggest proper solutions (in order of preference):**
+
+   **a) Fix the flush method to be complete:**
+   ```ruby
+   # BEST - Make flush actually wait for everything
+   def flush
+     writer.flush  # Wait for writer
+     worker.join   # Wait for worker thread
+     backend.wait  # Wait for backend completion
+   end
+   ```
+
+   **b) Add explicit wait for the missing operation:**
+   ```ruby
+   # GOOD - Wait for the specific operation flush doesn't cover
+   tracer.flush
+   backend.wait_for_upload  # Explicit wait for what flush misses
+   expect(backend.traces).to include(expected_trace)
+   ```
+
+   **c) Use queue-based synchronization:**
+   ```ruby
+   # ACCEPTABLE - Add completion signal
+   completion = Queue.new
+   tracer.flush { completion.push(:done) }
+   Timeout.timeout(2) { completion.pop }
+   expect(backend.traces).to include(expected_trace)
+   ```
+
+   **d) Sleep is ONLY acceptable as LAST RESORT with:**
+   - Clear comment explaining WHY flush is insufficient
+   - Reference to issue/ticket to fix the underlying problem
+   - Timeout to fail fast if operation never completes
+
+   ```ruby
+   # LAST RESORT - Document why this is needed
+   tracer.flush
+   # TODO(#12345): flush doesn't wait for background upload thread
+   # Remove this sleep once flush is fixed to wait for upload completion
+   Timeout.timeout(2) do
+     sleep 0.01 until backend.traces.include?(expected_trace)
+   end
+   ```
+
+**Example feedback patterns:**
+
+**Pattern 1: Sleep probably not needed**
+```markdown
+❌ CRITICAL: Sleep after flush without justification
+
+File: spec/datadog/tracing/flush_spec.rb:45
+Code:
+```ruby
+tracer.flush
+sleep 0.1
+expect(backend.traces).to eq([trace])
+```
+
+**This sleep is likely not needed.** Flush should wait for all operations.
+
+**Required action:**
+1. Remove the sleep
+2. Run the test 100 times: `for i in {1..100}; do bundle exec rspec spec/file.rb:45; done`
+3. If it passes consistently → commit without sleep
+4. If it fails → proceed to analysis (see next pattern)
+```
+
+**Pattern 2: Flush insufficient - needs investigation**
+```markdown
+❌ CRITICAL: Sleep after flush without clear explanation
+
+File: spec/datadog/tracing/flush_spec.rb:45
+Code:
+```ruby
+tracer.flush
+sleep 0.1  # Wait for background thread
+expect(backend.traces).to eq([trace])
+```
+
+**Why is flush insufficient? Provide proof.**
+
+**Required information:**
+1. **What operation is flush not waiting for?**
+   - Background thread? Which one?
+   - Network upload? To where?
+   - Queue processing? Which queue?
+
+2. **Proof that sleep is needed:**
+   - Show test failure without sleep (paste stack trace)
+   - Show timing info: when does operation actually complete?
+   - Show what flush DOES wait for vs what's missing
+
+3. **Proper fix (not sleep):**
+   - Fix flush to wait for background thread: `worker.join`
+   - Add explicit wait: `backend.wait_for_upload`
+   - Add completion callback: `tracer.flush { queue.push(:done) }`
+
+**Do not use sleep as a workaround for incomplete flush.**
+```
+
+**Pattern 3: Acceptable sleep (rare)**
+```markdown
+✅ Sleep after flush - acceptable with clear justification
+
+File: spec/datadog/tracing/flush_spec.rb:45
+Code:
+```ruby
+tracer.flush
+# TODO(#12345): flush doesn't wait for background upload thread completion
+# The upload happens in a separate thread that flush doesn't join
+# Fix: Make flush wait for upload_thread.join
+Timeout.timeout(2) do
+  sleep 0.01 until backend.received_upload?
+end
+expect(backend.traces).to eq([trace])
+```
+
+**This is acceptable because:**
+1. Clear comment explains why flush is insufficient (background upload thread)
+2. TODO with ticket number to fix the underlying issue
+3. Timeout to fail fast (2 seconds)
+4. Polls for explicit condition (not arbitrary delay)
+
+**However, still recommend fixing flush to wait for upload thread.**
+```
+
+**Summary: Sleep After Flush Checklist**
+
+When reviewing sleep after flush:
+- [ ] Question: Is sleep needed? Remove and test 100x
+- [ ] If needed: Require explanation WHY flush insufficient
+- [ ] Require proof: Test failure without sleep
+- [ ] Require root cause: What operation is flush missing?
+- [ ] Suggest fixes: Fix flush, add explicit wait, or use queue
+- [ ] Last resort: Sleep with comment, TODO ticket, and timeout
+- [ ] Never accept: Sleep without clear technical justification
+
+**Default stance: Flush should be sufficient. If it's not, fix flush, don't add sleep.**
+
 **How to check:**
 ```bash
 # Search for sleep in tests
