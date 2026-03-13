@@ -285,51 +285,67 @@ gh pr checkout <PR_NUMBER>
 # View PR details and comments
 gh pr view <PR_NUMBER>
 
-# Get ALL review comments as JSON with pagination (only non-outdated)
+# Get ALL review comments as JSON with pagination (only non-outdated, non-resolved)
 # CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
+# Note: GitHub review comments include a top-level comment (parent) and replies (children)
+# Resolved status is on the top-level comment in the thread
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq '[.[] | select(.outdated == true | not)]'
+  jq '[.[] | select((.outdated == true | not) and (.pull_request_review_id != null) and ((.in_reply_to_id == null and .resolved == false) or .in_reply_to_id != null))]'
 ```
 
-**CRITICAL: Ignore outdated comments**
+**CRITICAL: Ignore outdated AND resolved comments**
 
 **What are outdated comments?**
 - Comments made on previous versions of code that has since been changed
 - GitHub marks comments as `outdated: true` when the code they reference is modified
 - They're collapsed in the UI under "Show outdated" sections
 
+**What are resolved comments?**
+- Comments that the reviewer marked as "Resolve conversation"
+- Indicates the issue has been addressed and acknowledged
+- Shown under "Show resolved" in the GitHub UI
+- Field: top-level comment has a property indicating resolution status
+
 **Why ignore them?**
-- They've usually already been addressed (that's why the code changed)
+- **Outdated:** They've usually already been addressed (that's why the code changed)
+- **Resolved:** Reviewer explicitly marked them as addressed/complete
 - The reviewer hasn't re-commented on new code, so no action needed
-- You'd be responding to code that no longer exists
+- You'd be responding to issues already acknowledged as fixed
 - Wastes time on historical context
 
 **How to identify them:**
 ```bash
-# Filter out outdated comments using jq
+# Filter out outdated AND resolved comments using jq
 # CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
+# Note: Resolved comments are marked at the thread level (top-level comment)
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq '[.[] | select(.outdated == true | not)]' > /tmp/current_comments.json
+  jq '[.[] | select(
+    (.outdated == true | not) and
+    ((.in_reply_to_id == null and (.resolved == false or .resolved == null)) or .in_reply_to_id != null)
+  )]' > /tmp/current_comments.json
 
-# Only process non-outdated comments
+# Only process non-outdated, non-resolved comments
 cat /tmp/current_comments.json
 ```
 
-**When to address an "outdated" comment:**
-- Only if the reviewer explicitly re-posts it on current code
+**When to address an "outdated" or "resolved" comment:**
+- **Outdated:** Only if the reviewer explicitly re-posts it on current code
+- **Resolved:** Only if the reviewer un-resolves it or comments again
 - Only if they say "this still applies to the new code"
-- Never respond to outdated comments unless explicitly asked
+- Never respond to outdated or resolved comments unless explicitly asked
 
 ### 2. Categorize Each Comment
 
-For each **non-outdated** comment, determine:
+For each **non-outdated, non-resolved** comment, determine:
 - Is this a change request?
 - Is this a question?
 - Do I disagree with this?
 
-**Skip any comments with `outdated: true` - they've been superseded by code changes.**
+**Skip any comments that are:**
+- `outdated: true` - they've been superseded by code changes
+- `resolved: true` (on parent comment) - they've been marked as addressed by reviewer
 
 ### 3. Process Change Requests
 

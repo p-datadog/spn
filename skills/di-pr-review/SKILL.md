@@ -204,7 +204,7 @@ This is a fundamental principle that applies to ALL the review requirements belo
 
 ## CRITICAL Review Requirements
 
-All 6 requirements below are **BLOCKING**. PRs must not be approved until all issues are resolved.
+All 7 requirements below are **BLOCKING**. PRs must not be approved until all issues are resolved.
 
 ### 1. NO Skipped Tests (CRITICAL)
 
@@ -888,6 +888,281 @@ Decision guide for log levels:
 - DEBUG: Network errors, I/O errors, serialization failures, buffer full, internal state issues
 - WARN: Invalid configuration, missing required files, permission errors, unsupported Ruby version
 ```
+
+### 7. Method Documentation (CRITICAL)
+
+**Requirement:** All public methods must have YARD-style docstrings with:
+1. Brief but descriptive summary of what the method does
+2. Parameter documentation with types
+3. Return value documentation
+
+**Principle:** Good documentation is essential for maintainability, debugging, and onboarding new team members. Methods without documentation are hard to understand and maintain.
+
+**Review actions:**
+- Check ALL new/modified public methods have docstrings
+- Verify docstrings include `@param` tags for all parameters
+- Verify docstrings include `@return` tag
+- Ensure descriptions are meaningful (not just repeating method name)
+- Check parameter types are documented
+- Verify exception documentation (`@raise`) where applicable
+
+**Required YARD tags:**
+- `@param [Type] name description` - For each parameter
+- `@return [Type] description` - Return value and type
+- `@raise [ExceptionClass] description` - For exceptions (if raised)
+- `@option` - For hash options parameters
+- `@yield` - For methods that accept blocks
+
+**How to check:**
+```bash
+# Find public methods without docstrings in changed files
+grep -B 1 "^\s*def " lib/datadog/di/ lib/datadog/symbol_database/ | \
+  grep -v "^\s*#" | grep "def "
+
+# Check for methods missing @param tags
+# Look for methods with parameters but no @param documentation
+```
+
+**Good Examples:**
+
+**Example 1: Simple method with parameters**
+```ruby
+# Reverses the contents of a string.
+#
+# @param [String] text the text to reverse
+# @return [String] the reversed text
+def reverse_text(text)
+  text.reverse
+end
+```
+
+**Example 2: Method with multiple parameters**
+```ruby
+# Downloads and saves a web page to disk.
+#
+# @param [String] url the URL of the page to download
+# @param [String] directory the directory to save to
+# @return [String] the path to the saved file
+def load_page(url, directory: 'pages')
+  # method body
+end
+```
+
+**Example 3: Method with hash options**
+```ruby
+# Extracts method parameters from a Ruby method definition.
+#
+# @param [String] method_name the name of the method to inspect
+# @param [Hash] options additional configuration
+# @option options [Boolean] :include_defaults (true) include parameter defaults
+# @option options [Boolean] :type_info (false) include parameter type information
+# @return [Array<Hash>] array of parameter information
+# @raise [NameError] if the method does not exist
+def extract_parameters(method_name, options = {})
+  # method body
+end
+```
+
+**Example 4: Method with block parameter**
+```ruby
+# Iterates over items and yields each to the block.
+#
+# @param [Array] items the collection to iterate over
+# @yield [item] passes each item to the block
+# @yieldparam [Object] item the current item from the collection
+# @return [Array] items for which the block returned true
+def filter_items(items)
+  items.select { |item| yield(item) }
+end
+```
+
+**Example 5: Method with exception documentation**
+```ruby
+# Loads configuration from a file.
+#
+# @param [String] file_path the path to the configuration file
+# @return [Hash] the parsed configuration
+# @raise [FileNotFoundError] if the file does not exist
+# @raise [JSON::ParserError] if the file contains invalid JSON
+def load_config(file_path)
+  # method body
+end
+```
+
+**BAD patterns to flag:**
+
+```ruby
+# BAD - No docstring at all
+def important_method(param1, param2)
+  # ...
+end
+
+# BAD - Missing parameter documentation
+# Does something with data.
+def process_data(data, options = {})
+  # ...
+end
+
+# BAD - Missing return documentation
+# Processes the input.
+# @param [String] input the input to process
+def process_input(input)
+  # ...
+end
+
+# BAD - Vague/unhelpful description
+# Handles the thing.
+# @param [Object] thing the thing
+# @return [Object] result
+def handle_thing(thing)
+  # ...
+end
+
+# BAD - Just repeating method name
+# Gets the value.
+# @param [Symbol] key the key
+# @return [Object] the value
+def get_value(key)
+  # ...
+end
+```
+
+**What makes a GOOD docstring:**
+
+✅ **Clear and specific:**
+```ruby
+# Extracts parameter names and types from a method definition using reflection.
+```
+
+❌ **Vague or generic:**
+```ruby
+# Handles parameters.
+```
+
+✅ **Describes behavior and purpose:**
+```ruby
+# Serializes local variables from a binding context, filtering out
+# internal variables and applying redaction rules for sensitive data.
+```
+
+❌ **Just restates the obvious:**
+```ruby
+# Serializes locals.
+```
+
+✅ **Complete documentation:**
+```ruby
+# Installs a line probe at the specified location.
+#
+# @param [String] file_path the absolute path to the target file
+# @param [Integer] line_number the line number where the probe should be installed (1-indexed)
+# @param [Hash] options probe configuration options
+# @option options [Boolean] :capture_locals (true) whether to capture local variables
+# @option options [String] :condition optional condition expression
+# @return [Probe] the installed probe instance
+# @raise [ProbeError] if probe installation fails
+# @raise [ArgumentError] if line_number is invalid
+def install_line_probe(file_path, line_number, options = {})
+  # method body
+end
+```
+
+**Common types in dd-trace-rb:**
+
+| Ruby Type | YARD Syntax | Example |
+|-----------|-------------|---------|
+| String | `[String]` | `@param [String] name` |
+| Integer | `[Integer]` | `@param [Integer] count` |
+| Boolean | `[Boolean]` | `@param [Boolean] enabled` |
+| Hash | `[Hash]` | `@param [Hash] options` |
+| Array | `[Array<Type>]` | `@param [Array<String>] names` |
+| Symbol | `[Symbol]` | `@param [Symbol] key` |
+| Nil | `[nil]` | `@return [nil]` |
+| Multiple types | `[Type1, Type2]` | `[String, Symbol]` |
+| Any object | `[Object]` | `@param [Object] data` |
+| Duck typing | `[#method_name]` | `[#to_s]` |
+
+**Private methods:**
+
+Private methods should also have docstrings, but they can be briefer:
+
+```ruby
+private
+
+# Validates probe configuration before installation.
+#
+# @param [Hash] config the probe configuration
+# @return [Boolean] true if valid
+# @raise [ConfigError] if configuration is invalid
+def validate_config(config)
+  # method body
+end
+```
+
+**Example feedback:**
+
+```
+❌ CRITICAL: Missing method documentation
+
+**File:** lib/datadog/di/probe_manager.rb:145
+
+**Code:**
+```ruby
+def register_probe(probe_id, file_path, line_number, options = {})
+  # method body
+end
+```
+
+**Issue:** Public method lacks docstring with parameter and return documentation.
+
+**Required fix:**
+```ruby
+# Registers a new probe for dynamic instrumentation.
+#
+# Adds the probe to the internal registry and installs the TracePoint
+# hook at the specified location.
+#
+# @param [String] probe_id unique identifier for the probe
+# @param [String] file_path absolute path to the target source file
+# @param [Integer] line_number line number where probe should be installed (1-indexed)
+# @param [Hash] options probe configuration options
+# @option options [Boolean] :capture_locals (true) capture local variables at probe location
+# @option options [String] :condition optional conditional expression
+# @return [Probe] the registered probe instance
+# @raise [ProbeError] if probe is already registered or installation fails
+# @raise [ArgumentError] if file_path or line_number is invalid
+def register_probe(probe_id, file_path, line_number, options = {})
+  # method body
+end
+```
+
+**Why this matters:**
+- Other developers need to understand what this method does
+- Parameters need clear type and purpose documentation
+- Return value and exceptions must be documented
+- Hash options should use `@option` tags for each key
+```
+
+**Exceptions to docstring requirement:**
+
+These methods do NOT require docstrings:
+- `initialize` - Constructor is self-documenting (but complex ones should still have docs)
+- One-line trivial accessors: `attr_reader :name`, `attr_accessor :value`
+- Obvious delegators: `def foo(...) @delegate.foo(...) end`
+- Override methods where parent has documentation (but use `@see ParentClass#method`)
+
+**For inherited/overridden methods:**
+```ruby
+# @see BaseClass#process for parameter and return documentation
+def process(data)
+  # specific implementation
+end
+```
+
+**References:**
+- [YARD Documentation Guide](https://yardoc.org/)
+- [YARD Tags Overview](https://rubydoc.info/gems/yard/file/docs/Tags.md)
+- [YARD Getting Started](https://rubydoc.info/gems/yard/file/docs/GettingStarted.md)
 
 ## Line Probe Test Files
 
@@ -1652,6 +1927,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] ✅ Complies with repository guidelines (CLAUDE.md, CONTRIBUTING.md, CI checks)
 - [ ] ✅ NO exception propagation (all instrumentation errors contained)
 - [ ] ✅ Proper error handling (all rescues have DEBUG/WARN logging + telemetry)
+- [ ] ✅ Method documentation (all public methods have YARD docstrings with @param and @return)
 
 **Additional Quality Checks:**
 - [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
@@ -1888,6 +2164,9 @@ Provide review feedback in this structure:
 
 ### ❌ 6. Error Handling
 [Any rescue blocks without logging or telemetry]
+
+### ❌ 7. Method Documentation
+[Any public methods without YARD docstrings]
 
 ## Additional Issues
 
