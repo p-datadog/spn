@@ -1561,6 +1561,310 @@ Is there a reason these need to be positional arguments?
 - Could you use keyword arguments anyway?
 - Will future maintainers understand the choice?
 
+## Nil-Defaulted Keyword Arguments in DI Class Constructors
+
+**Overview:** DI class constructors often have keyword arguments that default to `nil` for dependencies. These nil defaults must be justified by actual usage patterns in production code, not by test convenience.
+
+**Critical Requirement:** When reviewing DI class constructors with `arg: nil` defaults, analyze whether the rest of DI actually constructs these classes without providing those arguments. If not, the keyword arguments must be required (no default).
+
+**⚠️ ANTI-RATIONALIZATION WARNING:**
+
+The most common bad reason for `nil` defaults:
+- ❌ "The test suite doesn't currently pass this argument in some tests"
+- ❌ "It makes test setup easier if we can omit this"
+- ❌ "Tests would need to be updated if we make it required"
+
+**These are NOT acceptable justifications.** Fix the tests, don't compromise the production API.
+
+### Why Nil Defaults on Required Dependencies Are Problematic
+
+**Type safety issues:**
+- Method assumes dependency exists, but constructor says it's optional
+- Nil checks scattered throughout the class or missing entirely
+- Runtime errors instead of immediate failures
+
+**API clarity issues:**
+- Constructor signature lies about what's actually required
+- Callers can't tell which arguments are truly optional
+- Documentation and reality diverge
+
+**Test-driven design smells:**
+- Tests driving production API rather than production needs
+- Lazy test setup forcing poor API design
+- Technical debt accumulating to avoid fixing tests
+
+### What to Flag
+
+**❌ Flag when nil defaults are only for test convenience:**
+
+```ruby
+# Constructor with nil defaults
+class ProbeManager
+  def initialize(settings:, telemetry: nil, logger: nil)
+    @settings = settings
+    @telemetry = telemetry  # Required for production, but nil in tests
+    @logger = logger        # Required for production, but nil in tests
+  end
+
+  def install_probe(probe)
+    # Assumes telemetry exists - will crash if nil
+    @telemetry.emit('probe.installed', probe_id: probe.id)
+    @logger.debug("Installed probe #{probe.id}")
+  end
+end
+
+# Production usage ALWAYS passes these
+ProbeManager.new(
+  settings: settings,
+  telemetry: Datadog.telemetry,
+  logger: Datadog.logger,
+)
+
+# But tests omit them (causing the nil defaults)
+ProbeManager.new(settings: test_settings)  # Tests rely on nil defaults
+```
+
+**Analysis questions:**
+1. Does production code ever construct this class without `telemetry`? **No**
+2. Does production code ever construct this class without `logger`? **No**
+3. Why do these default to nil? **Only for test convenience**
+4. What should be done? **Make them required, fix the tests**
+
+### What's Acceptable vs What's Not
+
+**✅ Acceptable nil defaults (truly optional):**
+
+```ruby
+# Callback is genuinely optional
+class SnapshotCollector
+  def initialize(settings:, on_snapshot: nil)
+    @settings = settings
+    @on_snapshot = on_snapshot  # Optional callback
+  end
+
+  def collect_snapshot(probe)
+    snapshot = build_snapshot(probe)
+    @on_snapshot&.call(snapshot)  # Only called if provided
+    snapshot
+  end
+end
+
+# Production sometimes uses callback, sometimes doesn't
+SnapshotCollector.new(settings: settings)  # Valid without callback
+SnapshotCollector.new(settings: settings, on_snapshot: ->(s) { ... })  # Valid with callback
+```
+
+**❌ Not acceptable (only nil for tests):**
+
+```ruby
+# Telemetry is required for production but nil in tests
+class ProbeInstaller
+  def initialize(settings:, telemetry: nil)
+    @settings = settings
+    @telemetry = telemetry
+  end
+
+  def install(probe)
+    # Production ALWAYS needs telemetry, but we made it optional for tests
+    @telemetry.emit('probe.installed')
+  end
+end
+
+# Production ALWAYS passes telemetry
+ProbeInstaller.new(settings: settings, telemetry: Datadog.telemetry)
+
+# Tests omit it (bad reason for nil default)
+ProbeInstaller.new(settings: test_settings)
+```
+
+### How to Check
+
+For each DI class constructor with `arg: nil` keyword arguments:
+
+**1. Find all call sites in production code:**
+```bash
+# Search for instantiations of the class
+grep -rn "ClassName.new" lib/datadog/di/ lib/datadog/symbol_database/
+
+# Exclude test files
+grep -rn "ClassName.new" lib/datadog/di/ lib/datadog/symbol_database/ | grep -v "_spec.rb"
+```
+
+**2. Check if production always provides the argument:**
+```bash
+# Example: Check if ProbeManager is ever constructed without telemetry
+grep -rn "ProbeManager.new" lib/datadog/di/ | grep -v "telemetry:"
+# If this returns no results, telemetry is ALWAYS provided in production
+```
+
+**3. Check if tests are the only reason for nil:**
+```bash
+# Find test constructions without the argument
+grep -rn "ProbeManager.new" spec/datadog/di/ | grep -v "telemetry:"
+# If this returns many results, tests are relying on the nil default
+```
+
+**4. Analyze the class implementation:**
+- Does the code assume the dependency exists? (calls methods on it without nil checks)
+- Are there nil guards scattered throughout? (defensive programming smell)
+- Would it crash/misbehave if the argument were actually nil?
+
+### Decision Tree
+
+```
+Constructor has keyword argument with nil default
+  ↓
+Question: Does production code ever construct this class without the argument?
+  ↓
+  ├─ YES → Nil default is acceptable (truly optional)
+  │
+  └─ NO → Nil default is NOT acceptable
+      ↓
+      Question: Why does it default to nil?
+      ↓
+      ├─ "Tests don't pass it" → NOT ACCEPTABLE
+      ├─ "Makes test setup easier" → NOT ACCEPTABLE
+      ├─ "Tests would break" → NOT ACCEPTABLE
+      └─ "We plan to make it optional later" → NOT ACCEPTABLE (YAGNI)
+      ↓
+      **Required action:** Make the argument required, fix the tests
+```
+
+### How to Fix
+
+**Before (nil default only for tests):**
+```ruby
+class ProbeManager
+  def initialize(settings:, telemetry: nil, logger: nil)
+    @settings = settings
+    @telemetry = telemetry
+    @logger = logger
+  end
+end
+
+# Production
+ProbeManager.new(
+  settings: settings,
+  telemetry: Datadog.telemetry,
+  logger: Datadog.logger,
+)
+
+# Tests (relying on nil defaults - bad)
+ProbeManager.new(settings: test_settings)
+```
+
+**After (required arguments, proper tests):**
+```ruby
+class ProbeManager
+  def initialize(settings:, telemetry:, logger:)  # No defaults
+    @settings = settings
+    @telemetry = telemetry
+    @logger = logger
+  end
+end
+
+# Production (unchanged)
+ProbeManager.new(
+  settings: settings,
+  telemetry: Datadog.telemetry,
+  logger: Datadog.logger,
+)
+
+# Tests (properly provide dependencies)
+ProbeManager.new(
+  settings: test_settings,
+  telemetry: instance_double(Datadog::Telemetry),
+  logger: instance_double(Logger),
+)
+```
+
+### Review Questions to Ask
+
+When you see `arg: nil` in a DI class constructor:
+
+1. **Is this argument ever omitted in production code?**
+   - Search all non-test call sites
+   - If always provided, it should be required
+
+2. **Does the implementation assume this argument exists?**
+   - Look for method calls without nil guards
+   - Look for `.` instead of `&.`
+   - If code assumes it exists, it should be required
+
+3. **What happens if this argument is actually nil?**
+   - Would the class crash?
+   - Would it silently do nothing?
+   - Is there defensive nil handling?
+
+4. **Why does this default to nil?**
+   - "Tests" is not a valid reason
+   - "Convenience" is not a valid reason
+   - Must be justified by production usage
+
+5. **Are there nil guards throughout the class?**
+   - `@telemetry&.emit(...)` everywhere
+   - `if @logger` checks scattered around
+   - This suggests the nil default is a mistake
+
+### Example Review Comment
+
+```markdown
+This constructor has `telemetry: nil` but production code always provides the telemetry argument.
+
+Analysis:
+- Searched lib/datadog/di/ for ProbeManager.new calls
+- All production instantiations provide telemetry: argument
+- Only tests omit the argument
+- Class implementation assumes telemetry exists (no nil guards)
+
+The nil default appears to exist only for test convenience, not because telemetry is truly optional in production.
+
+Suggested change:
+\`\`\`ruby
+def initialize(settings:, telemetry:, logger:)  # No nil defaults
+\`\`\`
+
+Tests should be updated to provide test doubles:
+\`\`\`ruby
+ProbeManager.new(
+  settings: test_settings,
+  telemetry: instance_double(Datadog::Telemetry),
+  logger: instance_double(Logger),
+)
+\`\`\`
+
+This makes the API honest about what's required and prevents nil-related bugs.
+```
+
+### Common Counterarguments and Responses
+
+**Argument:** "But making it required will break tests"
+- **Response:** Then fix the tests. Tests should match production usage.
+
+**Argument:** "It's easier to test without setting up all dependencies"
+- **Response:** Use test doubles (instance_double). This is what they're for.
+
+**Argument:** "We might make it optional in the future"
+- **Response:** YAGNI. Make it required now, change it when actually needed.
+
+**Argument:** "Some tests don't need this dependency"
+- **Response:** If production needs it, tests should provide it. Use proper mocks.
+
+**Argument:** "It's defensive programming to allow nil"
+- **Response:** Defensive against what? If production always provides it, nil is not a real scenario.
+
+### Exceptions (Rare)
+
+**Acceptable nil defaults:**
+1. **Truly optional features**: Callbacks, hooks, optional integrations
+2. **Backward compatibility**: During deprecation periods (document timeline)
+3. **Different execution contexts**: Different behavior in different environments
+
+**Even for these, prefer:**
+- Explicit optional pattern objects (NullObject pattern)
+- Separate constructors for different use cases
+- Feature flags rather than nil checks
+
 ## Hardcoded /tmp Paths
 
 **Overview:** Code must not use hardcoded paths in `/tmp`. These paths can lead to file collisions, security issues, and test flakiness in parallel execution environments.
@@ -2555,6 +2859,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] NO useless comments (see Useless Comments section - systematic check required)
 - [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
 - [ ] NO defaulted positional arguments (challenge: why not keyword arguments? codebase prefers keyword args)
+- [ ] NO nil-defaulted keyword arguments in constructors unless truly optional (analyze production usage)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
 - [ ] Bounded memory usage (no binding leaks)
@@ -2605,6 +2910,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Search for sleep in tests
    - Search for hardcoded /tmp paths
    - Search for defaulted positional arguments (see Defaulted Positional Arguments section)
+   - Search for nil-defaulted keyword arguments in constructors (see Nil-Defaulted Keyword Arguments section)
    - Search for debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
@@ -2767,6 +3073,17 @@ grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
 # Check for defaulted positional arguments
 grep -rn "def .*=.*)" lib/datadog/di/ lib/datadog/symbol_database/
 # Review each match: Should these be keyword arguments instead?
+
+# Check for nil-defaulted keyword arguments in constructors
+# Find initialize methods with keyword arguments defaulted to nil
+grep -rn "def initialize.*:.*nil" lib/datadog/di/ lib/datadog/symbol_database/
+# For each match, analyze:
+# 1. Find all call sites: grep -rn "ClassName.new" lib/datadog/di/ | grep -v "_spec.rb"
+# 2. Check if production always provides the argument
+# 3. If yes, the argument should be required (no nil default)
+# Example analysis for a specific class:
+#   grep -rn "ProbeManager.new" lib/datadog/di/ | grep -v "telemetry:"
+#   # If no results, production always provides telemetry - should be required
 
 # Check for debugging diagnostics in production code
 grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
