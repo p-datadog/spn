@@ -393,8 +393,10 @@ gh pr diff <PR_NUMBER> | grep -i "pattern"
 # If it still finds matches, go back to step 4 and fix them
 
 # 7. Respond inline to the comment with all locations fixed
-gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
-  -f body="Fixed in the following locations: ..."
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments \
+  -X POST \
+  -f body="Fixed in the following locations: ..." \
+  -F in_reply_to=<COMMENT_ID>
 ```
 
 ### 4. Respond to All Comments
@@ -403,9 +405,17 @@ gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
 
 ```bash
 # Respond inline to any comment (change request, question, or disagreement)
-gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
-  -f body="Your response here..."
+gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments \
+  -X POST \
+  -f body="Your response here..." \
+  -F in_reply_to=<COMMENT_ID>
 ```
+
+**Notes:**
+- Use `-f` flag for string fields like `body`
+- Use `-F` flag for numeric fields like `in_reply_to`
+- Must include `-X POST` to specify the method
+- PR number is required in the URL path
 
 **Note:** Every comment gets an inline response, whether it's a change request showing all fixes, a question being answered, or a disagreement being discussed.
 
