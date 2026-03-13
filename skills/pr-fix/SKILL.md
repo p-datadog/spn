@@ -73,8 +73,15 @@ echo "PR #<PR_NUMBER>: $(echo "$pr_info" | jq -r '.title')"
 
 Get all CI check results:
 
+**⚠️ IMPORTANT: Bash Variable Naming**
+
+Avoid bash reserved variable names to prevent "read-only variable" errors:
+- ❌ **DON'T use:** `status`, `PATH`, `HOME`, `USER`, `SHELL`, `PWD`, `RANDOM`
+- ✅ **DO use:** `ci_status`, `check_results`, `ci_checks`, `test_status`
+
 ```bash
 # Get all checks with their state
+# Note: Using 'checks' variable (safe), NOT 'status' (reserved)
 checks=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,state,link)
 
 # Count failures

@@ -860,6 +860,12 @@ git push origin HEAD
 
 **Monitoring process:**
 
+**⚠️ IMPORTANT: Bash Variable Naming**
+
+Avoid bash reserved variable names to prevent "read-only variable" errors:
+- ❌ **DON'T use:** `status`, `PATH`, `HOME`, `USER`, `SHELL`, `PWD`, `RANDOM`, `LINENO`
+- ✅ **DO use:** `ci_status`, `check_results`, `checks`, `ci_checks`
+
 ```bash
 # Wait for CI to start running after push (30 seconds)
 echo "Waiting for CI to start running new checks..."
@@ -872,6 +878,7 @@ while true; do
   echo "Time: $(date)"
 
   # Get current CI status
+  # IMPORTANT: Using 'checks' variable (safe), NOT 'status' (reserved in bash)
   checks=$(gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
     jq '[.[] | select(.name | test("test|spec|e2e|integration|build.*test"; "i"))]')
 
