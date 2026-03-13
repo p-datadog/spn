@@ -2488,20 +2488,24 @@ Outdated comments are GitHub PR review comments that were made on previous versi
 # Note: outdated can be false OR null for current comments
 
 # IMPORTANT: Use file-based jq filter to avoid shell quoting issues
-cat > /tmp/filter_current.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(.outdated != true)]
 EOF
 
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_current.jq
+  jq -f "$filter_file"
+rm -f "$filter_file"
 
 # See which comments are outdated
-cat > /tmp/filter_outdated.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(.outdated == true) | {path, line, body: .body[0:100]}]
 EOF
 
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments | \
-  jq -f /tmp/filter_outdated.jq
+  jq -f "$filter_file"
+rm -f "$filter_file"
 ```
 
 **When to address an "outdated" comment:**
@@ -2550,31 +2554,38 @@ gh pr checkout <PR_NUMBER>
 # Note: outdated can be false OR null for current comments
 
 # IMPORTANT: Use file-based jq filters to avoid shell quoting issues
-cat > /tmp/filter_current_with_body.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(.outdated != true) | {path, line, body}]
 EOF
 
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_current_with_body.jq
+  jq -f "$filter_file"
+rm -f "$filter_file"
 
 # Count current vs outdated comments
 # CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
 
-cat > /tmp/filter_current_count.jq << 'EOF'
+filter_current=$(mktemp)
+filter_outdated=$(mktemp)
+
+cat > "$filter_current" << 'EOF'
 [.[] | select(.outdated != true)] | length
 EOF
 
-cat > /tmp/filter_outdated_count.jq << 'EOF'
+cat > "$filter_outdated" << 'EOF'
 [.[] | select(.outdated == true)] | length
 EOF
 
 echo "Current comments:"
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_current_count.jq
+  jq -f "$filter_current"
 echo "Outdated comments (ignore these):"
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_outdated_count.jq
+  jq -f "$filter_outdated"
+
+rm -f "$filter_current" "$filter_outdated"
 
 # CRITICAL: Systematically check ALL code comments for utility
 # This finds EVERY comment added in the PR - review each one

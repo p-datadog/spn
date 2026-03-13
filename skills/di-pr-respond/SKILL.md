@@ -70,10 +70,12 @@ All TracePoint callbacks now have proper error boundaries with logging and telem
 **2. Search the PR diff first:**
 ```bash
 # Get full diff and search for pattern
-gh pr diff <PR_NUMBER> | grep -i "<pattern>" > /tmp/matches.txt
+matches_file=$(mktemp)
+gh pr diff <PR_NUMBER> | grep -i "<pattern>" > "$matches_file"
 
 # Review all matches
-cat /tmp/matches.txt
+cat "$matches_file"
+rm -f "$matches_file"
 ```
 
 **3. Search changed files directly:**
@@ -293,7 +295,8 @@ gh pr view <PR_NUMBER>
 
 # IMPORTANT: Use file-based jq filter to avoid shell quoting issues with special characters
 # The != operator and complex boolean logic can cause bash to escape characters unexpectedly
-cat > /tmp/filter_comments.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(
   (.outdated != true) and
   (.pull_request_review_id != null) and
@@ -306,7 +309,8 @@ cat > /tmp/filter_comments.jq << 'EOF'
 EOF
 
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_comments.jq
+  jq -f "$filter_file"
+rm -f "$filter_file"
 ```
 
 **CRITICAL: Ignore outdated AND resolved comments**
@@ -337,7 +341,8 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
 # Note: Resolved comments are marked at the thread level (top-level comment)
 
 # IMPORTANT: Use file-based jq filter to avoid shell quoting issues
-cat > /tmp/filter_current_comments.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(
   (.outdated != true) and
   (
@@ -348,11 +353,14 @@ cat > /tmp/filter_current_comments.jq << 'EOF'
 )]
 EOF
 
+comments_file=$(mktemp)
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq -f /tmp/filter_current_comments.jq > /tmp/current_comments.json
+  jq -f "$filter_file" > "$comments_file"
+rm -f "$filter_file"
 
 # Only process non-outdated, non-resolved comments
-cat /tmp/current_comments.json
+cat "$comments_file"
+rm -f "$comments_file"
 ```
 
 **When to address an "outdated" or "resolved" comment:**
@@ -385,14 +393,16 @@ For each change request:
 
 # 3. Search for similar patterns in the diff
 # CRITICAL: Search for BOTH code and semantic mentions (comments, docs)
-gh pr diff <PR_NUMBER> | grep -i "pattern" > /tmp/matches.txt
-cat /tmp/matches.txt  # Review all matches
+matches_file=$(mktemp)
+gh pr diff <PR_NUMBER> | grep -i "pattern" > "$matches_file"
+cat "$matches_file"  # Review all matches
 
 # Try variations to ensure completeness
 gh pr diff <PR_NUMBER> | grep -i "semantic_pattern"
 
 # Verify you found everything
 gh pr diff <PR_NUMBER> | grep -i "pattern" | wc -l  # Count occurrences
+rm -f "$matches_file"
 
 # 4. Fix all similar occurrences found
 # Use Edit tool for each location (code + comments + docs)

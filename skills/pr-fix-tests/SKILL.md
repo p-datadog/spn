@@ -250,10 +250,11 @@ run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
   jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 
 # Fetch the first ~500 lines of logs (infrastructure failures usually appear early)
-gh run view $run_id --log 2>&1 | head -500 > /tmp/job_sample.txt
+log_file=$(mktemp)
+gh run view $run_id --log 2>&1 | head -500 > "$log_file"
 
 # Check for infrastructure failure patterns
-if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' /tmp/job_sample.txt; then
+if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' "$log_file"; then
   echo "🔄 INFRASTRUCTURE FAILURE detected in <CHECK_NAME>"
   echo "   Restarting job automatically..."
 
@@ -263,6 +264,7 @@ if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disable
   echo "   ✅ Job restarted successfully"
   # Skip this job for fixing, move to next
 fi
+rm -f "$log_file"
 ```
 
 #### Infrastructure Failure Detection Pattern
@@ -608,10 +610,11 @@ grep 'scope_context.rb:218' *.xml
 **Without JUnit artifacts (SLOW):**
 ```bash
 # Download massive log file
-gh run view 22979950861 --log > /tmp/log.txt  # 5MB, takes 30 seconds
+log_file=$(mktemp)
+gh run view 22979950861 --log > "$log_file"  # 5MB, takes 30 seconds
 
 # Search for failures (takes 20 seconds)
-grep -n "FAILED\|Error\|Failure" /tmp/log.txt | wc -l
+grep -n "FAILED\|Error\|Failure" "$log_file" | wc -l
 # Output: 847 lines (mostly noise)
 
 # Try to find actual test failures (manual searching through 847 lines)
@@ -658,7 +661,8 @@ run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
   jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 
 # View the failure logs
-gh run view $run_id --log > /tmp/test_failure_${CHECK_NAME}.txt
+log_file=$(mktemp)
+gh run view $run_id --log > "$log_file"
 
 # Or use the details URL
 details_url=$(gh pr checks <PR_NUMBER> --json name,detailsUrl | \
@@ -1062,13 +1066,15 @@ When the skill is invoked with a PR number:
 2. **Get failed test checks:**
    ```bash
    # IMPORTANT: Use file-based jq filter to avoid shell quoting issues
-   cat > /tmp/filter_failed_tests.jq << 'EOF'
+   filter_file=$(mktemp)
+   cat > "$filter_file" << 'EOF'
 [.[] | select(.state == "FAILURE")] |
 map(select(.name | test("test|spec|e2e|integration|build.*test"; "i")))
 EOF
 
    failed_tests=$(gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-     jq -r -f /tmp/filter_failed_tests.jq)
+     jq -r -f "$filter_file")
+   rm -f "$filter_file"
    ```
 
 3. **Detect and restart infrastructure failures:**
@@ -1525,13 +1531,15 @@ This skill requires:
 gh pr checkout <PR_NUMBER>
 
 # Get failed test checks (using file-based jq filter)
-cat > /tmp/filter_test_failures.jq << 'EOF'
+filter_file=$(mktemp)
+cat > "$filter_file" << 'EOF'
 [.[] | select(.state == "FAILURE")] |
 map(select(.name | test("test|spec|e2e|integration"; "i")))
 EOF
 
 gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-  jq -f /tmp/filter_test_failures.jq
+  jq -f "$filter_file"
+rm -f "$filter_file"
 
 # Get test failure logs
 run_id=$(gh pr checks <PR_NUMBER> --json name,link | \

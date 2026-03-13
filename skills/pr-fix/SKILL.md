@@ -153,25 +153,31 @@ Categorize each failed check into one of these types:
 # Categorize failures
 # IMPORTANT: Use file-based jq filters to avoid shell quoting issues
 
-cat > /tmp/filter_test_count.jq << 'EOF'
+filter_test=$(mktemp)
+filter_lint=$(mktemp)
+filter_type=$(mktemp)
+
+cat > "$filter_test" << 'EOF'
 [.[] | select(.state == "FAILURE") | select(.name | test("test|spec|rspec|jest|e2e|integration|build.*test"; "i"))]
 | length
 EOF
 
-cat > /tmp/filter_lint_count.jq << 'EOF'
+cat > "$filter_lint" << 'EOF'
 [.[] | select(.state == "FAILURE") | select(.name | test("standard|standardrb|lint|eslint|style|prettier|format"; "i"))]
 | length
 EOF
 
-cat > /tmp/filter_type_count.jq << 'EOF'
+cat > "$filter_type" << 'EOF'
 [.[] | select(.state == "FAILURE") | select(.name | test("steep|sorbet|typecheck|type-check|mypy|typescript"; "i"))]
 | length
 EOF
 
-test_failures=$(echo "$checks" | jq -r -f /tmp/filter_test_count.jq)
-lint_failures=$(echo "$checks" | jq -r -f /tmp/filter_lint_count.jq)
-type_failures=$(echo "$checks" | jq -r -f /tmp/filter_type_count.jq)
+test_failures=$(echo "$checks" | jq -r -f "$filter_test")
+lint_failures=$(echo "$checks" | jq -r -f "$filter_lint")
+type_failures=$(echo "$checks" | jq -r -f "$filter_type")
 other_failures=$((failed_checks - test_failures - lint_failures - type_failures))
+
+rm -f "$filter_test" "$filter_lint" "$filter_type"
 
 echo "Failure breakdown:"
 echo "  Test failures: $test_failures"

@@ -83,14 +83,16 @@ run_id=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,link | 
   jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 
 # Fetch first ~500 lines of logs (infrastructure failures usually appear early)
-gh run view $run_id --repo DataDog/dd-trace-rb --log 2>&1 | head -500 > /tmp/job_logs.txt
+log_file=$(mktemp)
+gh run view $run_id --repo DataDog/dd-trace-rb --log 2>&1 | head -500 > "$log_file"
 
 # Check for infrastructure failure patterns
-if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' /tmp/job_logs.txt; then
+if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' "$log_file"; then
   echo "🔄 INFRASTRUCTURE FAILURE detected - will restart"
 else
   echo "⚠️  CODE FAILURE - skip (not infrastructure)"
 fi
+rm -f "$log_file"
 ```
 
 **What gets restarted:**
@@ -247,15 +249,17 @@ When the skill is invoked:
    run_id=$(echo "$runs" | jq -r '.run_id')
 
    # View logs
-   gh run view $run_id --repo DataDog/dd-trace-rb --log > /tmp/check_log.txt
+   log_file=$(mktemp)
+   gh run view $run_id --repo DataDog/dd-trace-rb --log > "$log_file"
 
    # Analyze for infrastructure failures
-   if grep -qiE "(github.*unavailable|api rate limit|connection timeout|runner.*error|internal server error)" /tmp/check_log.txt; then
+   if grep -qiE "(github.*unavailable|api rate limit|connection timeout|runner.*error|internal server error)" "$log_file"; then
      echo "    🔄 Infrastructure failure detected, restarting..."
      gh run rerun $run_id --repo DataDog/dd-trace-rb --failed
    else
      echo "    ⚠️  Appears to be a code/test failure, not restarting"
    fi
+   rm -f "$log_file"
    ```
 
 5. **Print final summary:**
