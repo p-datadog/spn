@@ -1061,9 +1061,14 @@ When the skill is invoked with a PR number:
 
 2. **Get failed test checks:**
    ```bash
+   # IMPORTANT: Use file-based jq filter to avoid shell quoting issues
+   cat > /tmp/filter_failed_tests.jq << 'EOF'
+[.[] | select(.state == "FAILURE")] |
+map(select(.name | test("test|spec|e2e|integration|build.*test"; "i")))
+EOF
+
    failed_tests=$(gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-     jq -r '[.[] | select(.state == "FAILURE")] |
-     map(select(.name | test("test|spec|e2e|integration|build.*test"; "i")))')
+     jq -r -f /tmp/filter_failed_tests.jq)
    ```
 
 3. **Detect and restart infrastructure failures:**
@@ -1519,10 +1524,14 @@ This skill requires:
 # Checkout PR
 gh pr checkout <PR_NUMBER>
 
-# Get failed test checks
+# Get failed test checks (using file-based jq filter)
+cat > /tmp/filter_test_failures.jq << 'EOF'
+[.[] | select(.state == "FAILURE")] |
+map(select(.name | test("test|spec|e2e|integration"; "i")))
+EOF
+
 gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-  jq '[.[] | select(.state == "FAILURE")] |
-      map(select(.name | test("test|spec|e2e|integration"; "i")))'
+  jq -f /tmp/filter_test_failures.jq
 
 # Get test failure logs
 run_id=$(gh pr checks <PR_NUMBER> --json name,link | \

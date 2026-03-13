@@ -290,8 +290,23 @@ gh pr view <PR_NUMBER>
 # Note: outdated can be false OR null for current comments
 # Note: GitHub review comments include a top-level comment (parent) and replies (children)
 # Resolved status is on the top-level comment in the thread
+
+# IMPORTANT: Use file-based jq filter to avoid shell quoting issues with special characters
+# The != operator and complex boolean logic can cause bash to escape characters unexpectedly
+cat > /tmp/filter_comments.jq << 'EOF'
+[.[] | select(
+  (.outdated != true) and
+  (.pull_request_review_id != null) and
+  (
+    (.in_reply_to_id == null and (.resolved != true))
+    or
+    .in_reply_to_id != null
+  )
+)]
+EOF
+
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq '[.[] | select((.outdated == true | not) and (.pull_request_review_id != null) and ((.in_reply_to_id == null and .resolved == false) or .in_reply_to_id != null))]'
+  jq -f /tmp/filter_comments.jq
 ```
 
 **CRITICAL: Ignore outdated AND resolved comments**
@@ -320,11 +335,21 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
 # CRITICAL: Must use --paginate to get all comments (GitHub returns 30 per page by default)
 # Note: outdated can be false OR null for current comments
 # Note: Resolved comments are marked at the thread level (top-level comment)
+
+# IMPORTANT: Use file-based jq filter to avoid shell quoting issues
+cat > /tmp/filter_current_comments.jq << 'EOF'
+[.[] | select(
+  (.outdated != true) and
+  (
+    (.in_reply_to_id == null and (.resolved != true))
+    or
+    .in_reply_to_id != null
+  )
+)]
+EOF
+
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
-  jq '[.[] | select(
-    (.outdated == true | not) and
-    ((.in_reply_to_id == null and (.resolved == false or .resolved == null)) or .in_reply_to_id != null)
-  )]' > /tmp/current_comments.json
+  jq -f /tmp/filter_current_comments.jq > /tmp/current_comments.json
 
 # Only process non-outdated, non-resolved comments
 cat /tmp/current_comments.json

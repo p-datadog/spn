@@ -592,9 +592,14 @@ When the skill is invoked with a PR number:
 
 2. **Get failed checks:**
    ```bash
+   # IMPORTANT: Use file-based jq filter to avoid shell quoting issues
+   cat > /tmp/filter_failed_nontests.jq << 'EOF'
+[.[] | select(.state == "FAILURE")] |
+map(select(.name | test("test|spec|e2e|integration|build.*test"; "i") | not))
+EOF
+
    failed_checks=$(gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-     jq -r '[.[] | select(.state == "FAILURE")] |
-     map(select(.name | test("test|spec|e2e|integration|build.*test"; "i") | not))')
+     jq -r -f /tmp/filter_failed_nontests.jq)
    ```
 
 3. **For each non-test failure:**
@@ -731,10 +736,14 @@ This skill requires:
 # Checkout PR
 gh pr checkout <PR_NUMBER>
 
-# Get failed non-test checks
+# Get failed non-test checks (using file-based jq filter)
+cat > /tmp/filter_nontests.jq << 'EOF'
+[.[] | select(.state == "FAILURE")] |
+map(select(.name | test("test|spec|e2e|integration"; "i") | not))
+EOF
+
 gh pr checks <PR_NUMBER> --json name,state,link,detailsUrl | \
-  jq '[.[] | select(.state == "FAILURE")] |
-      map(select(.name | test("test|spec|e2e|integration"; "i") | not))'
+  jq -f /tmp/filter_nontests.jq
 
 # Common fix commands
 bundle exec rake standard:fix       # Ruby linting (auto-fix)

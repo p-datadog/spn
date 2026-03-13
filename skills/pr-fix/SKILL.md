@@ -151,21 +151,26 @@ Categorize each failed check into one of these types:
 
 ```bash
 # Categorize failures
-test_failures=$(echo "$checks" | jq -r '
-  [.[] | select(.state == "FAILURE") | select(.name | test("test|spec|rspec|jest|e2e|integration|build.*test"; "i"))]
-  | length
-')
+# IMPORTANT: Use file-based jq filters to avoid shell quoting issues
 
-lint_failures=$(echo "$checks" | jq -r '
-  [.[] | select(.state == "FAILURE") | select(.name | test("standard|standardrb|lint|eslint|style|prettier|format"; "i"))]
-  | length
-')
+cat > /tmp/filter_test_count.jq << 'EOF'
+[.[] | select(.state == "FAILURE") | select(.name | test("test|spec|rspec|jest|e2e|integration|build.*test"; "i"))]
+| length
+EOF
 
-type_failures=$(echo "$checks" | jq -r '
-  [.[] | select(.state == "FAILURE") | select(.name | test("steep|sorbet|typecheck|type-check|mypy|typescript"; "i"))]
-  | length
-')
+cat > /tmp/filter_lint_count.jq << 'EOF'
+[.[] | select(.state == "FAILURE") | select(.name | test("standard|standardrb|lint|eslint|style|prettier|format"; "i"))]
+| length
+EOF
 
+cat > /tmp/filter_type_count.jq << 'EOF'
+[.[] | select(.state == "FAILURE") | select(.name | test("steep|sorbet|typecheck|type-check|mypy|typescript"; "i"))]
+| length
+EOF
+
+test_failures=$(echo "$checks" | jq -r -f /tmp/filter_test_count.jq)
+lint_failures=$(echo "$checks" | jq -r -f /tmp/filter_lint_count.jq)
+type_failures=$(echo "$checks" | jq -r -f /tmp/filter_type_count.jq)
 other_failures=$((failed_checks - test_failures - lint_failures - type_failures))
 
 echo "Failure breakdown:"
