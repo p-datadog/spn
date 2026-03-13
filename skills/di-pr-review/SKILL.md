@@ -1403,6 +1403,164 @@ When line probe test files are modified incorrectly:
 **Alternative:** If possible, add new methods at the end of the file to avoid shifting existing line numbers.
 ```
 
+## Defaulted Positional Arguments
+
+**Overview:** Methods with defaulted positional arguments should use keyword arguments instead. The codebase strongly prefers keyword arguments for clarity, flexibility, and maintainability.
+
+**Critical Requirement:** When reviewing method signatures with default values, challenge why they are positional arguments instead of keyword arguments.
+
+### Why Keyword Arguments Are Preferred
+
+**Clarity at call sites:**
+```ruby
+# ❌ BAD - What do these values mean?
+processor.run(data, 30, 3, true)
+
+# ✅ GOOD - Clear and self-documenting
+processor.run(data, timeout: 30, retries: 3, verbose: true)
+```
+
+**Flexibility:**
+- Keyword arguments can be passed in any order
+- New parameters can be added without breaking existing calls
+- Optional parameters are self-documenting at call sites
+
+**Maintainability:**
+- Adding new parameters doesn't require updating all call sites
+- Parameter meaning is clear without reading method definition
+- Refactoring is safer (can reorder, add, or remove parameters)
+
+### What to Flag
+
+**❌ Flag these patterns:**
+```ruby
+# Positional arguments with defaults
+def process(data, timeout = 30, retries = 3)
+  # ...
+end
+
+# Mixed positional and defaulted positional
+def configure(name, path, enabled = true, verbose = false)
+  # ...
+end
+
+# Optional positional arguments
+def send_telemetry(event, error = nil, probe_id = nil)
+  # ...
+end
+```
+
+**✅ Prefer these patterns:**
+```ruby
+# Required positional, optional keyword
+def process(data, timeout: 30, retries: 3)
+  # ...
+end
+
+# All keyword arguments
+def configure(name:, path:, enabled: true, verbose: false)
+  # ...
+end
+
+# Required and optional keyword arguments
+def send_telemetry(event:, error: nil, probe_id: nil)
+  # ...
+end
+```
+
+### When Positional Arguments Are Acceptable
+
+**✅ Acceptable:**
+- Required positional arguments (no defaults)
+- Single-argument methods
+- Methods that take a block as the primary argument
+
+```ruby
+# OK - Required positional, no defaults
+def process(data, options)
+  # ...
+end
+
+# OK - Single argument
+def validate(input)
+  # ...
+end
+
+# OK - Block is primary argument
+def with_instrumentation(&block)
+  # ...
+end
+```
+
+**❌ Not acceptable:**
+- Positional arguments with default values
+- Multiple optional positional arguments
+- Positional arguments after keyword arguments
+
+### How to Check
+
+Search for method definitions with default values:
+
+```bash
+# Find methods with defaulted positional arguments
+grep -rn "def .*=.*)" lib/datadog/di/ lib/datadog/symbol_database/
+
+# Look for patterns like:
+# - def method(arg, opt = value)
+# - def method(arg1, arg2 = value, arg3 = value)
+# - def method(arg = value)
+```
+
+### Review Questions to Ask
+
+When you see a method with defaulted positional arguments:
+
+1. **Why are these positional instead of keyword arguments?**
+   - Is there a specific reason they need to be positional?
+   - Would keyword arguments be clearer?
+
+2. **How is this method called?**
+   - Are call sites clear about what each argument means?
+   - Would keyword arguments make call sites more readable?
+
+3. **Could this method evolve?**
+   - Might more parameters be added in the future?
+   - Would keyword arguments make the method more maintainable?
+
+4. **Is this a public API?**
+   - Public methods especially should use keyword arguments
+   - Breaking changes are harder with positional arguments
+
+### Example Review Comment
+
+```markdown
+This method uses defaulted positional arguments. The codebase prefers keyword arguments for clarity and maintainability.
+
+Current:
+def process_probe(probe, timeout = 5, max_depth = 3)
+
+Suggested:
+def process_probe(probe, timeout: 5, max_depth: 3)
+
+This makes call sites more readable:
+- Before: process_probe(probe, 10, 5)
+- After: process_probe(probe, timeout: 10, max_depth: 5)
+
+Is there a reason these need to be positional arguments?
+```
+
+### Exceptions
+
+**Rare cases where positional defaults might be acceptable:**
+- Internal/private methods with very stable signatures
+- Methods matching external API signatures (compatibility)
+- Performance-critical code (keyword arguments have minor overhead)
+
+**Even in these cases, consider:**
+- Is the clarity trade-off worth it?
+- Could you use keyword arguments anyway?
+- Will future maintainers understand the choice?
+
 ## Hardcoded /tmp Paths
 
 **Overview:** Code must not use hardcoded paths in `/tmp`. These paths can lead to file collisions, security issues, and test flakiness in parallel execution environments.
@@ -2396,6 +2554,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 **Additional Quality Checks:**
 - [ ] NO useless comments (see Useless Comments section - systematic check required)
 - [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
+- [ ] NO defaulted positional arguments (challenge: why not keyword arguments? codebase prefers keyword args)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
 - [ ] Bounded memory usage (no binding leaks)
@@ -2445,6 +2604,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Search for skipped tests
    - Search for sleep in tests
    - Search for hardcoded /tmp paths
+   - Search for defaulted positional arguments (see Defaulted Positional Arguments section)
    - Search for debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
@@ -2603,6 +2763,10 @@ grep -rn "sleep\s\|Kernel\.sleep" spec/ test/
 grep -rn "'/tmp/\|\"\/tmp\/" lib/ spec/
 grep -rn "File\.\(write\|read\|open\).*['\"]\/tmp\/" lib/ spec/
 grep -rn "FileUtils\..*['\"]\/tmp\/" lib/ spec/
+
+# Check for defaulted positional arguments
+grep -rn "def .*=.*)" lib/datadog/di/ lib/datadog/symbol_database/
+# Review each match: Should these be keyword arguments instead?
 
 # Check for debugging diagnostics in production code
 grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
