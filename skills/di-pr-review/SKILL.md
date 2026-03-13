@@ -1916,6 +1916,470 @@ Datadog.logger.debug { "[SymDB] Extracting parameters for #{method_name}" }
 - Remove diagnostic comments (# DEBUG:, # DIAGNOSTIC:, # TODO: remove)
 ```
 
+## Useless Comments
+
+**Overview:** Code comments should add value by explaining WHY something is done, not WHAT is being done. Comments that merely restate the code are noise and must be removed.
+
+**Critical Requirement:** All comments in the PR must provide meaningful information that isn't obvious from reading the code itself.
+
+### Systematic Comment Review
+
+**CRITICAL:** You MUST systematically review ALL comments added in the PR diff, not just sample a few files.
+
+**How to find ALL new comments in the PR:**
+
+```bash
+# Find ALL new comments (lines starting with + and containing #)
+# Exclude frozen_string_literal magic comments
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal"
+
+# Get count of new comments
+gh pr diff <PR_NUMBER> | grep "^\+.*#" | grep -v "frozen_string_literal" | wc -l
+
+# Save to file for systematic review
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal" > /tmp/pr_comments.txt
+cat /tmp/pr_comments.txt
+```
+
+**This command finds:**
+- All lines added in the diff (starting with `+`)
+- That contain a `#` character (comments)
+- Excluding magic comments like `# frozen_string_literal: true`
+
+**Common mistake to avoid:**
+- ❌ Reviewing only one or two files
+- ❌ Spot-checking a few obvious comments
+- ❌ Assuming some files won't have useless comments
+- ✅ Systematically reviewing EVERY comment in the PR diff
+
+### What Makes a Comment Useless
+
+**Useless comments:**
+- Restate what the code obviously does
+- Document the WHAT instead of the WHY
+- Describe implementation details already clear from code
+- Narrate the code flow step-by-step
+- Were added during development as "thought process notes"
+- State the obvious
+
+**Useful comments:**
+- Explain WHY a decision was made
+- Document non-obvious constraints or requirements
+- Reference external documentation or tickets
+- Explain workarounds for known issues
+- Clarify complex business logic
+- Document performance considerations
+- Explain security or safety requirements
+
+### Examples of Useless Comments (DEMAND REMOVAL)
+
+**❌ Example 1: Restating what code does**
+```ruby
+# BAD - Comment just restates the code
+# Create shared probe repository first - no dependencies
+probe_repository = Datadog::DI::ProbeRepository.new
+
+# REMOVE - The code is self-documenting
+probe_repository = Datadog::DI::ProbeRepository.new
+```
+
+**❌ Example 2: Obvious implementation narration**
+```ruby
+# BAD - Narrating obvious code flow
+# Initialize the configuration
+config = Config.new
+
+# Set the timeout value
+config.timeout = 30
+
+# Start the worker
+worker.start
+
+# REMOVE ALL - Code is obvious, comments add no value
+config = Config.new
+config.timeout = 30
+worker.start
+```
+
+**❌ Example 3: Documenting variable assignments**
+```ruby
+# BAD - Obvious from variable name
+# Store the probe ID
+probe_id = probe.id
+
+# Get the current timestamp
+timestamp = Time.now
+
+# REMOVE - Variable names are clear
+probe_id = probe.id
+timestamp = Time.now
+```
+
+**❌ Example 4: Step-by-step code narration**
+```ruby
+# BAD - Narrating implementation steps
+def process_snapshot
+  # Extract the data
+  data = snapshot.data
+
+  # Filter out sensitive fields
+  filtered = filter_sensitive(data)
+
+  # Serialize to JSON
+  json = JSON.dump(filtered)
+
+  # Return the result
+  json
+end
+
+# REMOVE ALL - Method name and code are clear
+def process_snapshot
+  data = snapshot.data
+  filtered = filter_sensitive(data)
+  JSON.dump(filtered)
+end
+```
+
+**❌ Example 5: Restating control flow**
+```ruby
+# BAD - Control flow is obvious
+# If probe is enabled, execute it
+if probe.enabled?
+  probe.execute
+end
+
+# Check if we have capacity
+if buffer.full?
+  # Return false if full
+  return false
+end
+
+# REMOVE - Control flow is self-evident
+if probe.enabled?
+  probe.execute
+end
+
+return false if buffer.full?
+```
+
+**❌ Example 6: Method summary that adds nothing**
+```ruby
+# BAD - Just restating method name
+# Process the probe
+def process_probe(probe)
+  # ...
+end
+
+# BAD - Obvious from parameters
+# Initialize with settings
+def initialize(settings)
+  @settings = settings
+end
+
+# REMOVE - Use YARD docs if documentation needed
+# See Section 7 for proper method documentation
+```
+
+### Examples of Useful Comments (KEEP)
+
+**✅ Example 1: Explaining WHY, not WHAT**
+```ruby
+# GOOD - Explains constraint/reasoning
+# ProbeRepository must be created before other components because
+# ProbeManager and CodeTracker both depend on it for probe lookups
+probe_repository = Datadog::DI::ProbeRepository.new
+```
+
+**✅ Example 2: Non-obvious constraints**
+```ruby
+# GOOD - Documents important constraint
+# Must disable TracePoint in ensure block to prevent memory leaks
+# from binding references held by the TracePoint object
+ensure
+  @trace.disable if @trace
+end
+```
+
+**✅ Example 3: Workarounds or gotchas**
+```ruby
+# GOOD - Explains workaround
+# Ruby 2.3 doesn't support #then, use #tap instead
+result.tap { |r| process(r) }
+
+# GOOD - Documents known issue
+# TODO(#12345): Remove this after upgrading to Ruby 3.0
+# Ruby 2.x requires explicit encoding for special characters
+string.force_encoding('UTF-8')
+```
+
+**✅ Example 4: Business logic explanation**
+```ruby
+# GOOD - Explains business rule
+# Snapshots are limited to 1000 variables to prevent memory exhaustion
+# in customer applications. This limit is configurable via settings.
+return variables.first(1000)
+```
+
+**✅ Example 5: Performance considerations**
+```ruby
+# GOOD - Explains performance tradeoff
+# Using Hash lookup instead of Array#find for O(1) vs O(n) performance
+# when matching probes. Critical for applications with 100+ probes.
+@probe_cache[key] = probe
+```
+
+**✅ Example 6: Security or safety requirements**
+```ruby
+# GOOD - Explains safety requirement
+# Never propagate exceptions to customer code - all instrumentation
+# failures must be contained. See Section 5 for error boundary requirements.
+rescue => e
+  log_error(e)
+end
+```
+
+### How to Evaluate Comments
+
+**Ask these questions for EACH comment:**
+
+1. **Can I understand the code without this comment?**
+   - Yes → Comment is probably useless
+   - No → Comment may be useful
+
+2. **Does the comment explain WHY instead of WHAT?**
+   - WHY → Probably useful
+   - WHAT → Probably useless
+
+3. **Would removing this comment make the code harder to understand?**
+   - No → Comment is useless, remove it
+   - Yes → Comment is useful, keep it
+
+4. **Does the comment add information not obvious from:**
+   - Method/variable names?
+   - Code structure?
+   - Standard Ruby idioms?
+   - If it adds nothing → Useless
+
+5. **Is this a "thought process" comment from development?**
+   - Yes → Definitely useless, remove it
+   - No → Evaluate further
+
+### Common Patterns of Useless Comments
+
+**Pattern 1: Implementation narration**
+```ruby
+# Create the object
+obj = Object.new
+```
+
+**Pattern 2: Variable description**
+```ruby
+# The user's name
+name = user.name
+```
+
+**Pattern 3: Control flow description**
+```ruby
+# Loop through items
+items.each do |item|
+```
+
+**Pattern 4: Method call description**
+```ruby
+# Call the process method
+process(data)
+```
+
+**Pattern 5: Assignment description**
+```ruby
+# Set the value
+@value = 42
+```
+
+**All of these should be REMOVED.**
+
+### Systematic Review Process
+
+**Step 1: Extract ALL comments from PR diff**
+```bash
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal" > /tmp/all_comments.txt
+```
+
+**Step 2: Review each comment individually**
+```bash
+# Count total comments to review
+total=$(wc -l < /tmp/all_comments.txt)
+echo "Total comments to review: $total"
+
+# Review each one
+cat /tmp/all_comments.txt
+```
+
+**Step 3: Identify useless comments**
+For each comment, ask:
+- Does it restate what code does?
+- Is it obvious from reading the code?
+- Would removing it reduce clarity? (No = useless)
+
+**Step 4: Demand removal of ALL useless comments**
+List every single useless comment with file and line number.
+
+### Feedback Template
+
+When useless comments are found:
+
+```markdown
+❌ Useless comments found in PR
+
+**Overview:** Found X comments that restate what the code does instead of explaining WHY. These must be removed.
+
+**Systematic review:**
+- Total comments added in PR: Y
+- Useless comments found: X
+- Useful comments: (Y - X)
+
+**Comments to remove:**
+
+1. **lib/datadog/di/component.rb:89**
+   ```ruby
+   # Create shared probe repository first - no dependencies
+   probe_repository = Datadog::DI::ProbeRepository.new
+   ```
+
+   **Issue:** Comment just restates what the code does.
+
+   **Why useless:** The code is self-documenting - it's clearly creating a ProbeRepository.
+
+   **Action:** Remove the comment entirely.
+
+2. **lib/datadog/di/component.rb:95**
+   ```ruby
+   # Initialize the probe manager
+   probe_manager = Datadog::DI::ProbeManager.new(settings, probe_repository, code_tracker)
+   ```
+
+   **Issue:** Comment narrates obvious initialization.
+
+   **Why useless:** Method name and parameters make this clear.
+
+   **Action:** Remove the comment.
+
+3. **lib/datadog/di/probe_manager.rb:145**
+   ```ruby
+   # Set the probe state to active
+   probe.state = :active
+   ```
+
+   **Issue:** Comment restates the assignment.
+
+   **Why useless:** The code `probe.state = :active` is self-explanatory.
+
+   **Action:** Remove the comment.
+
+**What makes a comment useful:**
+- Explains WHY a decision was made (not WHAT is being done)
+- Documents non-obvious constraints or requirements
+- References tickets, issues, or external documentation
+- Explains workarounds or gotchas
+- Clarifies complex business logic
+
+**Example of converting useless → useful:**
+
+Before (useless):
+```ruby
+# Create shared probe repository first - no dependencies
+probe_repository = Datadog::DI::ProbeRepository.new
+```
+
+After (if comment is actually needed):
+```ruby
+# ProbeRepository must be initialized before ProbeManager and CodeTracker
+# because both depend on it for probe lookups. Creating it first avoids
+# circular dependency issues.
+probe_repository = Datadog::DI::ProbeRepository.new
+```
+
+Or better yet (if comment isn't needed):
+```ruby
+# No comment - code is self-documenting
+probe_repository = Datadog::DI::ProbeRepository.new
+```
+
+**Required action:**
+- Remove ALL useless comments listed above
+- Use meaningful method/variable names instead of comments
+- Only keep comments that explain WHY, not WHAT
+- Use YARD docstrings for method documentation (see Section 7)
+
+**Systematic verification:**
+After removal, verify no useless comments remain:
+```bash
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal"
+# Review each remaining comment for utility
+```
+```
+
+### How to Check for Useless Comments
+
+**Required commands:**
+
+```bash
+# Step 1: Find ALL comments in the PR diff
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal" > /tmp/comments.txt
+
+# Step 2: Count them
+echo "Total comments to review: $(wc -l < /tmp/comments.txt)"
+
+# Step 3: Review each one systematically
+cat /tmp/comments.txt
+
+# Step 4: For each file with comments, read the context
+# Don't just look at grep output - read the actual file to see if comment adds value
+
+# Step 5: Identify useless comments
+# Ask: Does this explain WHY or just restate WHAT?
+
+# Step 6: List ALL useless comments in feedback
+```
+
+**Common sources of useless comments:**
+- Added during initial implementation (thought process notes)
+- Copied from other code without considering if needed
+- Added "for clarity" but just restate obvious code
+- Left over from refactoring (describe old approach)
+- Written before code became self-documenting
+
+### Distinction from Debugging Diagnostics
+
+**Debugging diagnostics (separate section):**
+- `# DEBUG:`, `# DIAGNOSTIC:`, `# TODO: remove`
+- Temporary markers for active debugging
+- Should be removed after debugging complete
+
+**Useless comments (this section):**
+- Regular code comments that add no value
+- Restate what code does
+- Were thought process notes during development
+- Make code noisier without adding understanding
+
+**Both should be removed, but for different reasons:**
+- Debugging → Temporary, indicates incomplete cleanup
+- Useless → Permanent but pointless, reduces code clarity
+
+### Prevention
+
+**During code writing:**
+- Write self-documenting code (clear names, simple structure)
+- Only add comments when code alone isn't sufficient
+- Ask: "Does this comment explain WHY?"
+- If explaining WHAT, improve the code instead
+
+**During review:**
+- Systematically check ALL comments
+- Apply the evaluation questions
+- Be strict: when in doubt, remove it
+- Better to have no comment than a useless one
+
 ## Review Checklist
 
 When reviewing a dd-trace-rb DI PR, verify:
@@ -1930,6 +2394,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] ✅ Method documentation (all public methods have YARD docstrings with @param and @return)
 
 **Additional Quality Checks:**
+- [ ] NO useless comments (see Useless Comments section - systematic check required)
 - [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
@@ -1976,6 +2441,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Identify if any line probe test files were modified
    - Verify line number changes are safe (additions at end) or tests are updated
 5. **Run critical checks**:
+   - **Systematically review ALL comments** in PR diff for utility (see Useless Comments section)
    - Search for skipped tests
    - Search for sleep in tests
    - Search for hardcoded /tmp paths
@@ -1983,6 +2449,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
+   - Check method documentation (all public methods have YARD docstrings)
 6. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, CI checks
 7. **Run tests**: `bundle exec rspec` with coverage
 8. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
@@ -2084,6 +2551,12 @@ echo "Outdated comments (ignore these):"
 gh api repos/DataDog/dd-trace-rb/pulls/<PR_NUMBER>/comments --paginate | \
   jq '[.[] | select(.outdated == true)] | length'
 
+# CRITICAL: Systematically check ALL code comments for utility
+# This finds EVERY comment added in the PR - review each one
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal"
+# Review each comment: Does it explain WHY or just restate WHAT?
+# Demand removal of comments that just restate what code does
+
 # Check for skipped tests
 grep -rn "^\s*skip\|^\s*pending\|^\s*xit\|^\s*xdescribe" spec/ test/
 
@@ -2176,6 +2649,20 @@ Provide review feedback in this structure:
 - Show the problematic lines (puts, warn, binding.pry, # DEBUG:, etc.)
 - Indicate whether in production code (lib/) or tests (spec/)
 - Suggest removal or replacement with proper logger
+
+### ⚠️ Useless Comments
+[If any useless comments are found:]
+- Report total comments added in PR vs useless comments found
+- List each useless comment with file:line
+- Show the comment and explain why it's useless
+- Demand removal (not rewriting - just delete them)
+- Note: Comments should explain WHY, not WHAT
+
+**Systematic check required:**
+```bash
+gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal"
+```
+Review EVERY comment found, not just a sample.
 
 ### ⚠️ Hardcoded /tmp Paths
 [If any hardcoded /tmp paths are found:]
