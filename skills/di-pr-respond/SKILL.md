@@ -399,8 +399,8 @@ gh api repos/DataDog/dd-trace-rb/pulls/comments/<COMMENT_ID>/replies \
 # Run tests to verify fixes
 bundle exec rspec
 
-# Check code style
-bundle exec rubocop
+# Check code style (dd-trace-rb uses StandardRB, not RuboCop)
+bundle exec standardrb
 
 # Review the diff
 git diff origin/$(git branch --show-current)..HEAD
@@ -606,7 +606,7 @@ Fixed in the following locations:
 
 **Verification:**
 - ✅ All tests passing
-- ✅ RuboCop clean
+- ✅ StandardRB clean
 - ✅ Coverage maintained at 100%
 ```
 
@@ -753,7 +753,7 @@ Fixed in the following locations:
 
 **Verification:**
 - ✅ All tests passing (bundle exec rspec)
-- ✅ RuboCop clean
+- ✅ StandardRB clean
 - ✅ Coverage maintained at 100%
 ```
 

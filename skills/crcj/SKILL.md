@@ -102,10 +102,12 @@ fi
 
 **What does NOT get restarted (code issues):**
 - Test assertion failures (`expected X, got Y`)
-- RuboCop/linting offenses
+- StandardRB/linting offenses
 - Code coverage failures
 - Security vulnerabilities
 - Syntax errors, NoMethodError, NameError, etc.
+
+**Note:** dd-trace-rb uses StandardRB for linting (not RuboCop).
 
 ### Step 6: Restart Infrastructure Failures
 
@@ -295,10 +297,12 @@ When the skill is invoked:
 
 **DO NOT RESTART:**
 - Test assertion failures (code issues)
-- Linting/formatting offenses (RuboCop, etc.)
+- Linting/formatting offenses (StandardRB, etc.)
 - Coverage failures
 - Security vulnerabilities
 - Syntax/runtime errors (NameError, NoMethodError, etc.)
+
+**Note:** dd-trace-rb uses StandardRB for linting (not RuboCop).
 
 See Step 5 for the complete regex pattern used for detection.
 

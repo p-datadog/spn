@@ -130,9 +130,9 @@ Categorize each failed check into one of these types:
 - Examples: "Ruby 2.7 / build & test", "Integration tests", "E2E specs"
 
 **Linting Failures:**
-- Name contains: "rubocop", "lint", "eslint", "style"
+- Name contains: "standard", "lint", "eslint", "style"
 - Name contains: "prettier", "format"
-- Examples: "RuboCop", "Linting", "Code style"
+- Examples: "StandardRB", "Standard", "Linting", "Code style"
 
 **Type Checking Failures:**
 - Name contains: "steep", "sorbet", "typecheck", "type-check"
@@ -150,7 +150,7 @@ test_failures=$(echo "$checks" | jq -r '
 ')
 
 lint_failures=$(echo "$checks" | jq -r '
-  [.[] | select(.state == "FAILURE") | select(.name | test("rubocop|lint|eslint|style|prettier|format"; "i"))]
+  [.[] | select(.state == "FAILURE") | select(.name | test("standard|standardrb|lint|eslint|style|prettier|format"; "i"))]
   | length
 ')
 
@@ -363,7 +363,7 @@ Please investigate manually or specify which skill to use.
 | Skill | When Used | What It Does |
 |-------|-----------|--------------|
 | `pr-fix-tests` | Test failures detected | Analyzes test failures, fixes code, monitors CI |
-| `pr-fix-lint` | Linting or type checking failures | Fixes RuboCop/linting violations, type errors |
+| `pr-fix-lint` | Linting or type checking failures | Fixes standard/linting violations, type errors |
 
 **NOT delegated to:**
 - `crcj` - Only for batch p-datadog PR maintenance (not single PR fixes)

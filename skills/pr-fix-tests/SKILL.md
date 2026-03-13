@@ -54,11 +54,13 @@ This skill ONLY addresses **test failures**:
 - **Build + test:** Jobs that build and run tests
 
 ### ❌ NOT Addressed (Non-Test Failures)
-- Linting failures (RuboCop, ESLint, Pylint)
+- Linting failures (StandardRB, ESLint, Pylint)
 - Static analysis (Brakeman, CodeQL)
 - Type checking (TypeScript, Sorbet, mypy)
 - Code formatting (Prettier, Black)
 - Style checks
+
+**Note:** dd-trace-rb uses StandardRB for linting (not RuboCop).
 - **Infrastructure failures** (see below)
 
 **Exception:** If fixing a test requires type changes, that's acceptable. But don't go out of your way to fix unrelated type/lint issues.
@@ -224,11 +226,13 @@ Look for failed checks matching these patterns:
 - "Cypress", "Playwright", "Selenium"
 
 **Exclude these patterns:**
-- "RuboCop", "rubocop", "lint"
+- "StandardRB", "standard", "lint"
 - "ESLint", "Prettier"
 - "Brakeman", "CodeQL"
 - "Sorbet", "mypy", "type-check"
 - Pure formatting/linting jobs
+
+**Note:** dd-trace-rb uses StandardRB (not RuboCop).
 
 ### Step 3.5: Check for Infrastructure Failures (Critical Filter)
 
@@ -1257,7 +1261,7 @@ Found 4 failed checks:
   ❌ Test (Ruby 2.7) - 2 failing tests
   ❌ Test (Ruby 3.1) - 2 failing tests
   ❌ Jest Tests - 1 failing test
-  ✅ RuboCop - Skipped (non-test job)
+  ✅ StandardRB - Skipped (non-test job)
 
 ## Checking for infrastructure failures...
 🔄 INFRASTRUCTURE FAILURE: Test (Ruby 3.0)

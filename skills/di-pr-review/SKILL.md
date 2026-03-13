@@ -573,25 +573,25 @@ Add tests that exercise:
 - Check for repository-specific guidelines:
   - Read `CLAUDE.md` if present
   - Read `CONTRIBUTING.md`
-  - Check `.rubocop.yml` configuration
   - Review CI/CD requirements
 - Verify compliance with:
-  - Code style (RuboCop)
+  - Code style (per CI checks)
   - Commit message format
   - Documentation requirements
   - CHANGELOG updates
   - Version compatibility
 
+**Note:** dd-trace-rb no longer uses RuboCop. Code style is enforced with StandardRB via CI checks.
+
 **How to check:**
 ```bash
 # Check for guideline files
-ls -la CLAUDE.md CONTRIBUTING.md .rubocop.yml
+ls -la CLAUDE.md CONTRIBUTING.md
 
-# Run RuboCop
-bundle exec rubocop
-
-# Check CI status
+# Check CI status for style/linting failures
 gh pr checks
+
+# CI will report any style violations
 ```
 
 **Example feedback:**
@@ -1649,7 +1649,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] ✅ NO skipped tests (no skip, pending, xit, xdescribe)
 - [ ] ✅ NO sleep in tests (use Queue, ConditionVariable, mock time)
 - [ ] ✅ 100% code coverage (all lines, branches, error paths)
-- [ ] ✅ Complies with repository guidelines (CLAUDE.md, CONTRIBUTING.md, RuboCop)
+- [ ] ✅ Complies with repository guidelines (CLAUDE.md, CONTRIBUTING.md, CI checks)
 - [ ] ✅ NO exception propagation (all instrumentation errors contained)
 - [ ] ✅ Proper error handling (all rescues have DEBUG/WARN logging + telemetry)
 
@@ -1707,7 +1707,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
    - Check error handling (all rescue blocks have logging + telemetry)
-6. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, RuboCop
+6. **Review repository compliance**: Check CLAUDE.md, CONTRIBUTING.md, CI checks
 7. **Run tests**: `bundle exec rspec` with coverage
 8. **Provide feedback**: Use the checklist above, flag all CRITICAL issues
 
@@ -1833,8 +1833,8 @@ gh pr diff <PR_NUMBER> | grep -E "^\+.*\b(puts|warn|binding\.pry|# DEBUG:|# DIAG
 # Run tests with coverage
 bundle exec rspec --require simplecov
 
-# Check RuboCop compliance
-bundle exec rubocop
+# Note: dd-trace-rb uses StandardRB (not RuboCop)
+# Code style is checked by StandardRB via CI - see gh pr checks output
 
 # Check for TracePoint without error boundaries
 grep -A 10 "TracePoint.new" lib/datadog/di/ | grep -v "rescue"
@@ -1931,7 +1931,7 @@ Provide review feedback in this structure:
 When the user says things like:
 - "Fix the sleep in tests"
 - "Fix the skipped test"
-- "Fix the RuboCop errors"
+- "Fix the linting errors"
 - "Fix the Steep type errors"
 - "Add the missing error boundary"
 - "Fix all the issues"
@@ -1944,10 +1944,12 @@ When the user says things like:
 - Test-related issues
 
 **Use `/pr-fix-lint` for:**
-- Linting errors (RuboCop, ESLint, StandardRB)
+- Linting errors (StandardRB, ESLint, etc.)
 - Type checking errors (Steep, Sorbet, TypeScript)
 - Formatting issues (Prettier, Black)
 - Static analysis issues
+
+**Note:** dd-trace-rb uses StandardRB for code style (not RuboCop).
 
 **Fix manually (in review skill) for:**
 - Issues that don't fit the fix skills (missing error boundaries, missing telemetry, hardcoded /tmp paths)
@@ -1961,7 +1963,7 @@ When the user says things like:
 
 **Example delegations:**
 - "Fix the sleep in tests" → `/pr-fix-tests <PR_NUMBER>`
-- "Fix the RuboCop violations" → `/pr-fix-lint <PR_NUMBER>`
+- "Fix the linting violations" → `/pr-fix-lint <PR_NUMBER>`
 - "Add the missing error boundary" → Fix manually (doesn't fit either skill)
 - "Fix all the test failures" → `/pr-fix-tests <PR_NUMBER>`
 - "Fix all the lint issues" → `/pr-fix-lint <PR_NUMBER>`
@@ -2112,11 +2114,11 @@ The pr-fix-tests skill will:
 
 **Review identifies:**
 ```
-❌ Repository Guidelines: RuboCop violations
+❌ Repository Guidelines: Linting violations
 Files with violations: lib/datadog/di/probe_manager.rb
 ```
 
-**User says:** "Fix the RuboCop issues"
+**User says:** "Fix the linting issues"
 
 **Correct response:**
 ```
@@ -2126,9 +2128,11 @@ I'll use the pr-fix-lint skill to fix the linting issues.
 
 The pr-fix-lint skill will:
 - Read CLAUDE.md for guidelines
-- Run rubocop -A to auto-fix
+- Run StandardRB (dd-trace-rb's linter)
 - Apply trailing commas per CLAUDE.md
 - Commit and push fixes
+
+**Note:** dd-trace-rb uses StandardRB for code style (not RuboCop).
 
 ---
 
