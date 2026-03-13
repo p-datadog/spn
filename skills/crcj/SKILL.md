@@ -6,7 +6,7 @@ version: 0.1.0
 
 # Check and Restart CI Jobs (crcj)
 
-This skill checks all PRs with the `p-datadog` label in the `DataDog/dd-trace-rb` repository and restarts failed CI jobs that appear to be infrastructure-related failures.
+This skill checks all PRs with the `p-datadog` label in the `DataDog/dd-trace-rb` repository and restarts failed CI jobs that failed due to infrastructure issues (GitHub Actions, runners, network, authentication, etc.).
 
 ## Overview
 
@@ -69,35 +69,43 @@ Look for checks where:
 - `status` = "completed"
 - `state` = "FAILURE"
 
-### Step 5: Investigate Failure Reasons
+### Step 5: Detect Infrastructure Failures
 
-For each failed check, examine the logs:
+**CRITICAL:** Use infrastructure detection patterns to identify jobs that should be restarted.
+
+**Source:** Infrastructure failure patterns are defined in `https://github.com/p-datadog/bells/blob/master/docs/infrastructure-failure-detection.md`
+
+For each failed check, scan the job logs for infrastructure failure patterns:
 
 ```bash
-# View check run details
-gh api repos/DataDog/dd-trace-rb/check-runs/<CHECK_RUN_ID>
+# Get the run ID from the check
+run_id=$(gh pr checks <PR_NUMBER> --repo DataDog/dd-trace-rb --json name,link | \
+  jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
 
-# Get logs URL from the response
-gh run view <RUN_ID> --repo DataDog/dd-trace-rb --log
+# Fetch first ~500 lines of logs (infrastructure failures usually appear early)
+gh run view $run_id --repo DataDog/dd-trace-rb --log 2>&1 | head -500 > /tmp/job_logs.txt
+
+# Check for infrastructure failure patterns
+if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' /tmp/job_logs.txt; then
+  echo "🔄 INFRASTRUCTURE FAILURE detected - will restart"
+else
+  echo "⚠️  CODE FAILURE - skip (not infrastructure)"
+fi
 ```
 
-**Infrastructure failure patterns to look for:**
-- GitHub API errors: "API rate limit exceeded", "GitHub is unavailable"
-- Network issues: "connection timeout", "connection refused", "network unreachable"
-- GitHub Actions issues: "failed to download action", "runner communication error"
-- Dependency download failures: "gem install failed", "bundle install timeout" (if transient)
-- Flaky tests that are clearly environment-related (not code issues)
-- "Internal server error" from GitHub
-- "Unable to process request at this time"
-- Container/image pull failures: "docker pull failed", "image not found" (if transient)
+**What gets restarted:**
+- GitHub Actions/API failures (401, 403, 404, 429, 5xx errors)
+- Git/checkout authentication failures
+- Runner communication/termination issues
+- Network timeouts and connectivity failures
+- Resource exhaustion (disk, memory)
 
-**NOT infrastructure failures (don't restart):**
-- Test failures with clear assertion errors
-- Code compilation errors
-- Linting/RuboCop failures
+**What does NOT get restarted (code issues):**
+- Test assertion failures (`expected X, got Y`)
+- RuboCop/linting offenses
 - Code coverage failures
-- Security vulnerabilities detected
-- Consistent, reproducible test failures
+- Security vulnerabilities
+- Syntax errors, NoMethodError, NameError, etc.
 
 ### Step 6: Restart Infrastructure Failures
 
@@ -272,51 +280,27 @@ When the skill is invoked:
    rm -f "$summary_file"
    ```
 
-## Infrastructure Failure Detection Heuristics
+## Infrastructure Failure Detection Reference
 
-Use these patterns to detect infrastructure failures in logs:
+**CRITICAL:** All infrastructure failure patterns are defined in the bells repository:
 
-**GitHub/Actions Issues:**
-- `API rate limit exceeded`
-- `GitHub is unavailable`
-- `Service Unavailable`
-- `Internal Server Error` (from github.com)
-- `failed to download action`
-- `Unable to process your request`
-- `runner.*communication error`
-- `Actions service is currently unavailable`
+**Source:** `https://github.com/p-datadog/bells/blob/master/docs/infrastructure-failure-detection.md`
 
-**Network Issues:**
-- `connection timeout`
-- `connection refused`
-- `network unreachable`
-- `Could not resolve host`
-- `Connection reset by peer`
-- `TLS handshake timeout`
+**Summary of detected patterns:**
+- GitHub Actions/API errors (401, 403, 404, 429, 5xx, rate limits, download failures)
+- Git authentication failures (fatal errors, exit code 128)
+- Runner communication/termination issues
+- Network connectivity failures (timeouts, DNS, connection errors)
+- Resource exhaustion (disk space, memory)
 
-**Dependency/Package Issues (transient):**
-- `Temporary failure resolving` (DNS)
-- `Failed to fetch` (intermittent)
-- `gem install.*timeout`
-- `bundle install.*timed out`
-- `npm.*network socket hung up`
-- `docker pull.*timeout`
-- `docker pull.*TLS handshake timeout`
+**DO NOT RESTART:**
+- Test assertion failures (code issues)
+- Linting/formatting offenses (RuboCop, etc.)
+- Coverage failures
+- Security vulnerabilities
+- Syntax/runtime errors (NameError, NoMethodError, etc.)
 
-**Test Infrastructure (flaky, not code):**
-- `Selenium.*driver.*error` (intermittent)
-- `ChromeDriver.*not reachable`
-- `Database.*connection pool exhausted` (if rare)
-- Test framework crashes (not assertion failures)
-
-**DO NOT RESTART for:**
-- RSpec/Minitest assertion failures
-- `expected X, got Y`
-- RuboCop offenses
-- SimpleCov coverage below threshold
-- Bundler-audit security findings
-- Syntax errors
-- NameError, NoMethodError, etc. (code errors)
+See Step 5 for the complete regex pattern used for detection.
 
 ## Example Output Format
 

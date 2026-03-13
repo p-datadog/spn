@@ -59,8 +59,37 @@ This skill ONLY addresses **test failures**:
 - Type checking (TypeScript, Sorbet, mypy)
 - Code formatting (Prettier, Black)
 - Style checks
+- **Infrastructure failures** (see below)
 
 **Exception:** If fixing a test requires type changes, that's acceptable. But don't go out of your way to fix unrelated type/lint issues.
+
+## Infrastructure Failures
+
+**CRITICAL:** This skill automatically restarts infrastructure failures and does not attempt to fix them.
+
+### What are Infrastructure Failures?
+
+Infrastructure failures are CI job failures caused by GitHub Actions, runners, network, authentication, or other system issues rather than actual code problems.
+
+**See:** `https://github.com/p-datadog/bells/blob/master/docs/infrastructure-failure-detection.md` for the complete list of patterns.
+
+**Common examples:**
+- GitHub Actions download failures (401, 403, 404, 429, 5xx errors)
+- Git authentication errors (`fatal: could not read Username/Password`)
+- Runner communication/termination issues
+- Network timeouts and connectivity failures
+- Resource exhaustion (disk space, memory)
+
+### How to Handle Infrastructure Failures
+
+1. **Detect** infrastructure failures by scanning job logs for patterns
+2. **Restart** them immediately - don't attempt to fix infrastructure issues
+3. **Report** them separately from test failures
+4. **Focus** on actual test failures that need code fixes
+
+**Infrastructure detection takes precedence:** Even if a job is named "Test XYZ", if it failed due to infrastructure issues, it should be restarted, not fixed.
+
+**Automatic restart:** When infrastructure failures are detected, this skill automatically restarts them and moves on to fix actual test failures.
 
 ## CRITICAL: Handling Flaky and Intermittent Test Failures
 
@@ -121,11 +150,12 @@ When a test fails inconsistently or shows signs of being flaky:
 1. Read repository guidelines (CLAUDE.md) and review requirements
 2. Fetch PR and check CI status
 3. Identify failed test jobs
-4. **→ Download and analyze JUnit artifacts** (preferred)
-5. → Fall back to log parsing (if artifacts unavailable)
-6. Fix test failures (commit separately)
-7. Push commits and monitor CI
-8. Repeat until all tests pass
+4. **→ Check for infrastructure failures** (scan logs, skip if found)
+5. **→ Download and analyze JUnit artifacts** (preferred, for non-infra failures)
+6. → Fall back to log parsing (if artifacts unavailable)
+7. Fix test failures (commit separately)
+8. Push commits and monitor CI
+9. Repeat until all tests pass
 
 ### Step 1: Read Repository Guidelines and Review Requirements
 
@@ -200,11 +230,163 @@ Look for failed checks matching these patterns:
 - "Sorbet", "mypy", "type-check"
 - Pure formatting/linting jobs
 
-### Step 3.5: Download and Analyze JUnit Artifacts (Preferred Method)
+### Step 3.5: Check for Infrastructure Failures (Critical Filter)
 
-**⚠️ IMPORTANT: Always try JUnit artifacts FIRST before parsing logs.**
+**⚠️ IMPORTANT: Before attempting to fix test failures, check if they're infrastructure-related.**
+
+Infrastructure failures should be **restarted**, not fixed. Skip any test jobs that failed due to infrastructure issues.
+
+#### How to Detect Infrastructure Failures
+
+For each failed test job, fetch a sample of the logs and scan for infrastructure patterns:
+
+```bash
+# Get the run ID from the check's link
+run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
+  jq -r '.[] | select(.name == "<CHECK_NAME>") | .link | split("/") | .[-3]')
+
+# Fetch the first ~500 lines of logs (infrastructure failures usually appear early)
+gh run view $run_id --log 2>&1 | head -500 > /tmp/job_sample.txt
+
+# Check for infrastructure failure patterns
+if grep -qE '(fatal: could not read (Username|Password)|terminal prompts disabled|exit code 128|401 \(Unauthorized\)|403 \(Forbidden\)|404 \(Not Found\)|429.*rate limit|5[0-9]{2}.*Server Error|API rate limit exceeded|failed to download action|Unable to download|runner.*lost communication|runner.*terminated|Unable to resolve host|Connection timed out|Network is unreachable|Operation canceled|Connection reset|TLS handshake timeout|No space left on device|Out of memory|Disk quota exceeded)' /tmp/job_sample.txt; then
+  echo "🔄 INFRASTRUCTURE FAILURE detected in <CHECK_NAME>"
+  echo "   Restarting job automatically..."
+
+  # Restart the failed job
+  gh run rerun $run_id --failed
+
+  echo "   ✅ Job restarted successfully"
+  # Skip this job for fixing, move to next
+fi
+```
+
+#### Infrastructure Failure Detection Pattern
+
+**Source:** Patterns are based on `https://github.com/p-datadog/bells/blob/master/docs/infrastructure-failure-detection.md`
+
+Use this regex pattern to detect infrastructure failures:
+
+```regex
+(fatal: could not read (Username|Password)|
+ terminal prompts disabled|
+ exit code 128|
+ 401 \(Unauthorized\)|
+ 403 \(Forbidden\)|
+ 404 \(Not Found\)|
+ 429.*rate limit|
+ 5[0-9]{2}.*Server Error|
+ API rate limit exceeded|
+ failed to download action|
+ Unable to download|
+ runner.*lost communication|
+ runner.*terminated|
+ Unable to resolve host|
+ Connection timed out|
+ Network is unreachable|
+ Operation canceled|
+ Connection reset|
+ TLS handshake timeout|
+ No space left on device|
+ Out of memory|
+ Disk quota exceeded)
+```
+
+This covers: GitHub Actions/API failures, Git authentication errors, runner failures, network issues, and resource exhaustion.
+
+#### When to Skip vs Fix
+
+**Skip (Infrastructure - restart instead):**
+- GitHub Actions download failures
+- Authentication errors during checkout
+- Runner communication errors
+- Network timeouts
+- Resource exhaustion (disk, memory)
+- HTTP 4xx/5xx errors from GitHub API
+
+**Fix (Actual Test Failures - this skill's job):**
+- RSpec/Jest/pytest assertion failures
+- Test expectation mismatches
+- Missing test setup
+- Code bugs causing test failures
+- Race conditions in test code
+- Outdated test expectations
+
+#### Example: Detecting Infrastructure Failure
+
+```bash
+# Failed job: "Test (Ruby 3.0)"
+run_id=12345678
+
+# Sample logs
+gh run view $run_id --log 2>&1 | head -500
+
+# Output contains:
+# ##[error]fatal: could not read Username for 'https://github.com': terminal prompts disabled
+# ##[error]The process '/usr/bin/git' failed with exit code 128
+
+# Detection and restart:
+echo "🔄 INFRASTRUCTURE FAILURE: Git authentication error"
+echo "   Pattern matched: 'fatal: could not read Username'"
+echo "   Restarting job automatically..."
+gh run rerun $run_id --failed
+echo "   ✅ Job restarted successfully"
+# Don't analyze JUnit artifacts or logs for this job - move to next
+```
+
+#### Workflow After Detection
+
+```bash
+# Categorize each failed test job
+infrastructure_jobs=()
+test_failure_jobs=()
+
+for job in $failed_test_jobs; do
+  run_id=$(get_run_id "$job")
+
+  # Sample logs and check for infrastructure patterns
+  if gh run view $run_id --log 2>&1 | head -500 | \
+     grep -qE '(fatal: could not read|401 \(Unauthorized\)|failed to download action|Connection timed out|No space left)'; then
+    echo "🔄 INFRASTRUCTURE: $job (restarting)"
+    infrastructure_jobs+=("$job")
+
+    # Restart the job immediately
+    echo "   Restarting $job (run $run_id)..."
+    gh run rerun $run_id --failed
+    echo "   ✅ Restarted successfully"
+  else
+    echo "🔍 TEST FAILURE: $job (will analyze and fix)"
+    test_failure_jobs+=("$job")
+  fi
+done
+
+# Report infrastructure failures
+if [ ${#infrastructure_jobs[@]} -gt 0 ]; then
+  echo ""
+  echo "=== Infrastructure Failures Restarted ==="
+  echo "The following jobs were restarted due to infrastructure issues:"
+  for job in "${infrastructure_jobs[@]}"; do
+    echo "  ✅ $job"
+  done
+  echo ""
+fi
+
+# Only proceed to fix test failures
+echo "=== Test Failures to Fix ==="
+for job in "${test_failure_jobs[@]}"; do
+  echo "  - $job"
+done
+```
+
+**Only proceed to Steps 4-7 for jobs in `test_failure_jobs` array.**
+
+### Step 4: Download and Analyze JUnit Artifacts (Preferred Method)
+
+**⚠️ IMPORTANT: Always try JUnit artifacts FIRST before parsing logs (for non-infrastructure failures).**
 
 JUnit XML artifacts provide structured test failure data that's much easier to parse than unstructured logs. This is the PREFERRED method for analyzing test failures.
+
+**Note:** This step is only for jobs that are NOT infrastructure failures. Infrastructure failures should have been filtered out in Step 3.5.
 
 #### Why JUnit Artifacts are Better
 
@@ -396,7 +578,7 @@ RuntimeError:
 2. Artifact download fails
 3. XML files are empty or corrupted
 
-**In these cases, proceed to Step 4 (log analysis).**
+**In these cases, proceed to Step 5 (log analysis).**
 
 #### Real Example: Ruby 2.7 Loading Test Failures
 
@@ -450,17 +632,19 @@ Before parsing logs, **ALWAYS:**
 
 **Only parse logs if JUnit artifacts are not available.**
 
-### Step 4: Analyze Test Failures from Logs (Fallback Method)
+### Step 5: Analyze Test Failures from Logs (Fallback Method)
 
-**⚠️ Use this method ONLY if JUnit artifacts are not available (Step 3.5).**
+**⚠️ Use this method ONLY if JUnit artifacts are not available (Step 4).**
 
 **When to use log parsing:**
-- No JUnit artifacts found in Step 3.5
+- No JUnit artifacts found in Step 4
 - JUnit artifact download failed
 - XML files are empty or corrupted
 - Non-RSpec test frameworks without JUnit output
 
-**Prefer Step 3.5 (JUnit artifacts) whenever possible - it's faster and more reliable.**
+**Prefer Step 4 (JUnit artifacts) whenever possible - it's faster and more reliable.**
+
+**Note:** This step is only for jobs that are NOT infrastructure failures. Infrastructure failures should have been filtered out in Step 3.5.
 
 For each identified test failure:
 
@@ -483,7 +667,7 @@ Parse the logs to understand:
 - Error messages and stack traces
 - Root cause of the failure
 
-### Step 5: Fix Each Test Failure (Commit Separately)
+### Step 6: Fix Each Test Failure (Commit Separately)
 
 **CRITICAL: Make ONE commit per logical fix**
 
@@ -576,7 +760,7 @@ it "finds only active users" do
 end
 ```
 
-### Step 6: Commit Each Fix
+### Step 7: Commit Each Fix
 
 After fixing a test or group of related tests:
 
@@ -647,7 +831,7 @@ Fixes failing test in spec/services/processor_spec.rb:112.
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-### Step 7: Push All Commits
+### Step 8: Push All Commits
 
 After all fixes are committed:
 
@@ -659,7 +843,7 @@ git log origin/$(git branch --show-current)..HEAD --oneline
 git push origin HEAD
 ```
 
-### Step 8: Continuously Monitor CI and Fix Remaining Failures
+### Step 9: Continuously Monitor CI and Fix Remaining Failures
 
 **IMPORTANT:** After pushing fixes, continuously monitor CI status and fix any remaining or new test failures.
 
@@ -716,8 +900,13 @@ while true; do
     echo "Failed checks:"
     echo "$failed_checks"
 
+    # IMPORTANT: Filter out infrastructure failures
+    # Check each failed job for infrastructure patterns
+    # Only fix jobs that are actual test failures, not infrastructure issues
+    # (Infrastructure failures should be restarted via /crcj)
+
     # Analyze and fix each failure (same process as initial fixes)
-    # ... (follow Steps 3-6 again for new failures)
+    # ... (follow Steps 3.5-7 again for new failures)
 
     # After fixing and pushing, restart the monitoring loop
     echo "Fixes pushed, restarting CI monitoring..."
@@ -866,8 +1055,38 @@ When the skill is invoked with a PR number:
      map(select(.name | test("test|spec|e2e|integration|build.*test"; "i")))')
    ```
 
-3. **For each test failure:**
-   - Download and analyze the failure logs
+3. **Detect and restart infrastructure failures:**
+   ```bash
+   # For each failed test check, scan logs for infrastructure patterns
+   infrastructure_jobs=()
+   test_failure_jobs=()
+
+   for job in $failed_tests; do
+     run_id=$(get_run_id "$job")
+
+     # Sample first 500 lines of logs
+     if gh run view $run_id --log 2>&1 | head -500 | \
+        grep -qE '(fatal: could not read|401 \(Unauthorized\)|failed to download action|Connection timed out|No space left)'; then
+       echo "🔄 INFRASTRUCTURE: $job (restarting)"
+       infrastructure_jobs+=("$job")
+
+       # Restart immediately
+       gh run rerun $run_id --failed
+       echo "   ✅ Restarted successfully"
+     else
+       test_failure_jobs+=("$job")
+     fi
+   done
+
+   # Report infrastructure failures
+   if [ ${#infrastructure_jobs[@]} -gt 0 ]; then
+     echo "=== Infrastructure Failures (restarted) ==="
+     printf '  ✅ %s\n' "${infrastructure_jobs[@]}"
+   fi
+   ```
+
+4. **For each non-infrastructure test failure:**
+   - Download and analyze JUnit artifacts (preferred) or logs
    - Identify which test file(s) are failing
    - Read the test file and understand what's expected
    - Read the source code being tested
@@ -925,8 +1144,9 @@ When the skill is invoked with a PR number:
        echo "Found $failed failure(s), fixing..."
        fix_rounds=$((fix_rounds + 1))
 
-       # Repeat steps 2-5 for new failures
-       # (analyze, fix, commit, push)
+       # Filter out infrastructure failures first (Step 3)
+       # Then repeat steps 3.5-8 for new non-infrastructure failures
+       # (check infra, analyze, fix, commit, push)
 
        sleep 30  # Wait for CI to start
        iteration=1
@@ -950,13 +1170,15 @@ Is check failing?
   ├─ No → Skip
   └─ Yes → Does name contain "test"/"spec"/"e2e"?
       ├─ No → Skip (non-test failure, use pr-fix-lint instead)
-      └─ Yes → Analyze test failure logs
-          ├─ Outdated expectation → Update test → Commit
-          ├─ Missing setup → Add setup → Commit
-          ├─ Async timing → Fix async handling → Commit
-          ├─ Changed signature → Update test → Commit
-          ├─ Code bug → Fix source code → Commit
-          └─ Other → Investigate → Fix → Commit
+      └─ Yes → Check logs for infrastructure patterns
+          ├─ Infrastructure failure detected → Skip (restart via /crcj)
+          └─ Not infrastructure → Analyze test failure
+              ├─ Outdated expectation → Update test → Commit
+              ├─ Missing setup → Add setup → Commit
+              ├─ Async timing → Fix async handling → Commit
+              ├─ Changed signature → Update test → Commit
+              ├─ Code bug → Fix source code → Commit
+              └─ Other → Investigate → Fix → Commit
 ```
 
 ## Fixing Strategy
@@ -1030,13 +1252,25 @@ Branch: feature/new-thing
 Base: main
 
 ## Checking CI Status...
-Found 3 failed checks:
-  ❌ Test (Ruby 3.0) - 2 failing tests
+Found 4 failed checks:
+  ❌ Test (Ruby 3.0) - Infrastructure failure
   ❌ Test (Ruby 2.7) - 2 failing tests
+  ❌ Test (Ruby 3.1) - 2 failing tests
   ❌ Jest Tests - 1 failing test
   ✅ RuboCop - Skipped (non-test job)
 
-## Analyzing Test (Ruby 3.0) failures...
+## Checking for infrastructure failures...
+🔄 INFRASTRUCTURE FAILURE: Test (Ruby 3.0)
+   Pattern matched: 'fatal: could not read Username'
+   Restarting job automatically...
+   ✅ Job restarted successfully
+
+## Test failures to fix (non-infrastructure):
+  🔍 Test (Ruby 2.7)
+  🔍 Test (Ruby 3.1)
+  🔍 Jest Tests
+
+## Analyzing Test (Ruby 2.7) failures...
 
 ### Failure 1: spec/models/user_spec.rb:45
 Error: expected "active" but got "activated"
@@ -1065,8 +1299,9 @@ Root cause: Missing await on async function
 ✅ All fixed tests passing locally
 
 ## Summary - Initial Round
-- Total checks analyzed: 4
+- Total checks analyzed: 5
 - Non-test jobs skipped: 1
+- Infrastructure failures restarted: 1
 - Test failures fixed: 3
 - Commits created: 3
 - Commits pushed: 3
@@ -1227,6 +1462,12 @@ Test checks: 12 passed, 0 failed, 0 running
 - Ignore them - only fix test failures
 - Don't restart monitoring for lint/type check failures
 - Report them in final summary but don't attempt to fix
+
+**Infrastructure failures appear during monitoring:**
+- Skip them - don't attempt to fix infrastructure issues
+- Infrastructure failures should be restarted, not fixed
+- Report them separately from test failures
+- Continue monitoring other test jobs
 
 **Maximum fix rounds reached (10 rounds):**
 - Stop monitoring and report to user
