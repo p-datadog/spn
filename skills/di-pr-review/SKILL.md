@@ -2416,6 +2416,341 @@ Benefits:
 **Argument:** "Not everyone knows tap"
 - **Response:** Tap is a standard Ruby method in widespread use. Any Ruby developer should be familiar with it, especially in test suites.
 
+## Test Assertions on Logging Must Include Message Content
+
+**Overview:** When writing tests that assert on logging behavior, the assertion must verify the actual log message content, not just that a logger method was called. Weak assertions that only check method calls miss the entire point of logging tests.
+
+**Critical Requirement:** Logging assertions must use `.with()` to match on message content, either exact strings, fragments, or patterns.
+
+### Why Message Content Assertions Are Required
+
+**Purpose of logging tests:**
+- Verify that **meaningful information** is logged
+- Ensure error messages help debugging
+- Confirm log messages contain relevant context (IDs, errors, states)
+- Document what gets logged for operational visibility
+
+**What weak assertions miss:**
+- The actual message content
+- Whether the log is useful for debugging
+- If error details are included
+- If important context (probe ID, file, line) is present
+
+**Example of the problem:**
+```ruby
+# Test passes but log could be empty or useless
+expect(logger).to receive(:debug).at_least(:once)
+
+# Test passes with any of these messages:
+#   logger.debug("")  # Empty!
+#   logger.debug("x")  # Useless!
+#   logger.debug("foo")  # Meaningless!
+```
+
+### What to Flag
+
+**❌ Flag weak assertions (method call only):**
+
+```ruby
+# BAD - Only checks that debug was called, not what was logged
+it 'logs the error' do
+  expect(logger).to receive(:debug).at_least(:once)
+  # ...
+end
+
+# BAD - Checks call count but not message
+it 'logs probe installation' do
+  expect(logger).to receive(:debug).once
+  # ...
+end
+
+# BAD - Any level without message verification
+it 'logs warning' do
+  expect(logger).to receive(:warn)
+  # ...
+end
+
+# BAD - Even with arguments matcher, no message verification
+it 'logs with metadata' do
+  expect(logger).to receive(:debug).with(anything)
+  # ...
+end
+```
+
+**✅ Require strong assertions (with message content):**
+
+```ruby
+# GOOD - Asserts on message fragment
+it 'logs probe execution failure' do
+  expect(logger).to receive(:debug).with(/probe execution failed/)
+  # ...
+end
+
+# GOOD - Asserts on specific string inclusion
+it 'logs the probe ID' do
+  expect(logger).to receive(:debug).with(a_string_including("probe_id: test-probe"))
+  # ...
+end
+
+# GOOD - Asserts on multiple message components
+it 'logs error with context' do
+  expect(logger).to receive(:warn).with(
+    /timeout.*exceeded/,
+    hash_including(probe_id: 'test-probe', timeout: 5)
+  )
+  # ...
+end
+
+# GOOD - Exact message match
+it 'logs snapshot serialization error' do
+  expect(logger).to receive(:debug).with("Failed to serialize snapshot", anything)
+  # ...
+end
+
+# GOOD - Pattern match with error details
+it 'logs exception message' do
+  expect(logger).to receive(:debug).with(
+    a_string_matching(/Probe execution failed.*RuntimeError/)
+  )
+  # ...
+end
+```
+
+### When Method-Only Assertions Are Acceptable
+
+**✅ Acceptable in these rare cases:**
+
+1. **Testing that logging is NOT called:**
+   ```ruby
+   # OK - Verifying no logging happens
+   it 'does not log when disabled' do
+     expect(logger).not_to receive(:debug)
+     # ...
+   end
+   ```
+
+2. **Counting calls without caring about content (very rare):**
+   ```ruby
+   # OK - Only if you truly don't care about message
+   # (Usually you should care!)
+   it 'logs each probe installation' do
+     expect(logger).to receive(:debug).exactly(3).times
+     # Only acceptable if message content is verified elsewhere
+   end
+   ```
+
+**In almost all cases, you should assert on message content.**
+
+### Examples of Good Logging Assertions
+
+**Example 1: Error logging with exception details**
+
+```ruby
+it 'logs probe execution failure with exception' do
+  error = RuntimeError.new('boom')
+
+  expect(logger).to receive(:debug).with(
+    a_string_matching(/Probe execution failed.*RuntimeError: boom/)
+  )
+
+  probe_manager.execute_probe(probe) rescue nil
+end
+```
+
+**Example 2: Logging with probe ID context**
+
+```ruby
+it 'includes probe ID in log message' do
+  expect(logger).to receive(:debug).with(
+    a_string_including("probe_id: test-probe-123")
+  )
+
+  probe_manager.install_probe(probe)
+end
+```
+
+**Example 3: Warning with timeout information**
+
+```ruby
+it 'logs timeout warning with duration' do
+  expect(logger).to receive(:warn).with(
+    /timeout.*exceeded.*5.*seconds/,
+    hash_including(probe_id: 'test-probe', duration: 5.0)
+  )
+
+  snapshot_collector.collect_with_timeout(probe, 5)
+end
+```
+
+**Example 4: Multiple log assertions**
+
+```ruby
+it 'logs installation steps' do
+  expect(logger).to receive(:debug).with(/starting probe installation/)
+  expect(logger).to receive(:debug).with(/probe validation passed/)
+  expect(logger).to receive(:debug).with(/probe installed successfully/)
+
+  probe_manager.install_probe(probe)
+end
+```
+
+**Example 5: Using ordered expectations**
+
+```ruby
+it 'logs in expected order' do
+  expect(logger).to receive(:debug).with(/acquiring lock/).ordered
+  expect(logger).to receive(:debug).with(/lock acquired/).ordered
+  expect(logger).to receive(:debug).with(/releasing lock/).ordered
+
+  probe_manager.with_lock { probe_manager.install_probe(probe) }
+end
+```
+
+### RSpec Matchers for Message Content
+
+Use these RSpec matchers to verify log message content:
+
+**Pattern matching:**
+```ruby
+expect(logger).to receive(:debug).with(/pattern/)
+expect(logger).to receive(:debug).with(a_string_matching(/pattern/))
+```
+
+**Substring inclusion:**
+```ruby
+expect(logger).to receive(:debug).with(a_string_including("substring"))
+```
+
+**Starting/ending with:**
+```ruby
+expect(logger).to receive(:debug).with(a_string_starting_with("Prefix:"))
+expect(logger).to receive(:debug).with(a_string_ending_with("complete"))
+```
+
+**Hash/metadata matching:**
+```ruby
+expect(logger).to receive(:debug).with(
+  anything,  # Message string
+  hash_including(probe_id: 'test-probe', status: 'installed')
+)
+```
+
+**Composite matchers:**
+```ruby
+expect(logger).to receive(:debug).with(
+  a_string_including("probe").and(matching(/id: \d+/))
+)
+```
+
+### How to Check
+
+Search for weak logging assertions in tests:
+
+```bash
+# Find logger expectations without message content verification
+grep -rn "expect(logger)" spec/datadog/di/ spec/datadog/symbol_database/ | \
+  grep -E "to receive\(:debug\)|to receive\(:warn\)|to receive\(:error\)" | \
+  grep -v "with("
+
+# This finds patterns like:
+#   expect(logger).to receive(:debug)
+#   expect(logger).to receive(:warn).once
+#   expect(logger).to receive(:error).at_least(:once)
+# All of these should have .with(...) to verify message content
+
+# Alternative: search for specific weak patterns
+grep -rn "expect(logger).*to receive.*\.once\s*$" spec/
+grep -rn "expect(logger).*to receive.*\.at_least" spec/ | grep -v "with("
+```
+
+### Review Questions to Ask
+
+When you see a logging assertion:
+
+1. **Does it verify the message content?**
+   - If no `.with()`, it's weak
+
+2. **Would the test catch an empty log message?**
+   - `expect(logger).to receive(:debug)` passes even for `logger.debug("")`
+
+3. **Would the test catch a meaningless message?**
+   - `expect(logger).to receive(:debug)` passes for `logger.debug("x")`
+
+4. **Does it verify relevant context?**
+   - Probe ID, error details, file/line, state information?
+
+5. **Is the assertion documenting what gets logged?**
+   - Good assertions serve as documentation
+
+### Example Review Comment
+
+```markdown
+This logging assertion only checks that the logger method is called, not what message is logged. This defeats the purpose of logging tests.
+
+Current:
+\`\`\`ruby
+it 'logs the error' do
+  expect(logger).to receive(:debug).at_least(:once)
+  # ...
+end
+\`\`\`
+
+Suggested:
+\`\`\`ruby
+it 'logs probe execution failure with error details' do
+  expect(logger).to receive(:debug).with(
+    a_string_matching(/Probe execution failed.*RuntimeError/)
+  )
+  # ...
+end
+\`\`\`
+
+This ensures:
+- The log message is meaningful
+- Error details are included
+- The assertion documents what gets logged
+- The test would fail if logging became empty or useless
+```
+
+### Common Counterarguments and Responses
+
+**Argument:** "I just want to verify logging happens, not micromanage the message"
+- **Response:** Logging tests exist to verify useful information is logged. Without message verification, the test has no value.
+
+**Argument:** "The message might change, I don't want brittle tests"
+- **Response:** Use pattern matching (`/probe.*failed/`) or substring matching (`a_string_including("probe")`) for flexibility while still verifying meaningful content.
+
+**Argument:** "It's too much work to write the message matcher"
+- **Response:** If the message isn't important enough to verify, the logging shouldn't exist. Every log message should be intentional and testable.
+
+**Argument:** "I'm testing that the logger is called the right number of times"
+- **Response:** You can verify both: `expect(logger).to receive(:debug).with(/pattern/).exactly(3).times`
+
+### Exceptions
+
+**The ONLY acceptable logger expectations without `.with()`:**
+
+1. **Negative assertions (no logging):**
+   ```ruby
+   expect(logger).not_to receive(:debug)
+   ```
+
+2. **Verification in a different test:**
+   ```ruby
+   # In one test: verify it's called
+   it 'calls logger' do
+     expect(logger).to receive(:debug).at_least(:once)
+   end
+
+   # In another test: verify the message
+   it 'logs meaningful error message' do
+     expect(logger).to receive(:debug).with(/probe.*failed/)
+   end
+   ```
+   **Note:** This is still discouraged. Prefer one test that verifies both.
+
+**In 99% of cases, use `.with()` to verify message content.**
+
 ## Debugging Diagnostics Left in PR
 
 **Overview:** Debugging statements and diagnostic code must be removed before merging. These create noise in logs, can leak internal information, and indicate incomplete cleanup.
@@ -3120,6 +3455,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] NO defaulted positional arguments (challenge: why not keyword arguments? codebase prefers keyword args)
 - [ ] NO nil-defaulted keyword arguments in constructors unless truly optional (analyze production usage)
 - [ ] Prefer tap pattern for let declarations with configuration (no intermediate variables)
+- [ ] Logging assertions must verify message content, not just method calls (use .with() matchers)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
 - [ ] Bounded memory usage (no binding leaks)
@@ -3172,6 +3508,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Search for defaulted positional arguments (see Defaulted Positional Arguments section)
    - Search for nil-defaulted keyword arguments in constructors (see Nil-Defaulted Keyword Arguments section)
    - Search for let declarations with intermediate variables (see Test Code Style: Prefer Tap Pattern section)
+   - Search for weak logging assertions without message content (see Logging Assertions section)
    - Search for debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
@@ -3356,6 +3693,18 @@ grep -A 10 "let(:" spec/datadog/di/ spec/datadog/symbol_database/ | grep -B 1 "^
 #     allow(builder).to receive(...)
 #     builder  # Flag: explicit return after config
 #   end
+
+# Check for weak logging assertions (without message content verification)
+# Find logger expectations that don't verify message content
+grep -rn "expect(logger)" spec/datadog/di/ spec/datadog/symbol_database/ | \
+  grep -E "to receive\(:debug\)|to receive\(:warn\)|to receive\(:error\)|to receive\(:info\)" | \
+  grep -v "with("
+# Review each match: Should this assert on message content?
+# Flag patterns like:
+#   expect(logger).to receive(:debug)
+#   expect(logger).to receive(:warn).once
+#   expect(logger).to receive(:error).at_least(:once)
+# All should use .with() to verify message: .with(/pattern/) or .with(a_string_including("text"))
 
 # Check for debugging diagnostics in production code
 grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
