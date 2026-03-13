@@ -2976,7 +2976,10 @@ Datadog.logger.debug { "[SymDB] Extracting parameters for #{method_name}" }
 
 **Overview:** Code comments should add value by explaining WHY something is done, not WHAT is being done. Comments that merely restate the code are noise and must be removed.
 
-**Critical Requirement:** All comments in the PR must provide meaningful information that isn't obvious from reading the code itself.
+**Critical Requirements:**
+- All comments in the PR must provide meaningful information that isn't obvious from reading the code itself
+- For borderline comments that have some value, consider how the code can be improved to make the comment unnecessary (better test descriptions, expanded documentation, renamed parameters)
+- Test descriptions should capture the **true intent** of what's being verified, not just describe the specific example values used
 
 ### Systematic Comment Review
 
@@ -3220,6 +3223,355 @@ end
    - Yes → Definitely useless, remove it
    - No → Evaluate further
 
+### Borderline Comments: Make Them Unnecessary Through Code Improvements
+
+**Overview:** For comments that are borderline useless but provide some value, don't just accept them—consider how the code can be improved to make the comments unnecessary.
+
+**Critical Principle:** Comments are often a code smell indicating that the code itself needs improvement. Before accepting a "somewhat useful" comment, ask: "How can I make this comment unnecessary?"
+
+#### Ways to Make Comments Unnecessary
+
+**1. Expand test descriptions to capture true intent**
+
+Test descriptions should explain **what behavior is being verified**, not just describe the specific example values used.
+
+**❌ BAD - Description tied to specific example:**
+```ruby
+# Comment needed because test description is unclear
+it 'returns 3 when max_depth is 3' do
+  # Test validates that depth limit is respected
+  result = capture_with_depth(3)
+  expect(result.depth).to eq(3)
+end
+```
+
+**✅ GOOD - Test description captures true intent, comment unnecessary:**
+```ruby
+# No comment needed - description explains intent
+it 'respects maximum capture depth configuration' do
+  result = capture_with_depth(3)
+  expect(result.depth).to eq(3)
+end
+```
+
+**❌ BAD - Example-focused description:**
+```ruby
+# Comment explaining what test actually verifies
+it 'handles probe with id "test-123"' do
+  # Verifies probe isolation - each probe uses separate namespace
+  probe = create_probe(id: 'test-123')
+  # ...
+end
+```
+
+**✅ GOOD - Intent-focused description:**
+```ruby
+# No comment needed - description captures intent
+it 'isolates probes in separate namespaces' do
+  probe = create_probe(id: 'test-123')
+  # ...
+end
+```
+
+**Principle for test descriptions:**
+- Describe **what behavior** is being tested, not **what values** are used
+- Focus on the **general principle**, not the **specific example**
+- Ask: "What am I actually trying to verify here?"
+- The test description should make the purpose obvious without reading comments
+
+**2. Expand method documentation (YARD docstrings)**
+
+Instead of inline comments, add or improve YARD documentation:
+
+**❌ BAD - Inline comment needed:**
+```ruby
+def capture_snapshot(probe, depth)
+  # depth parameter controls max object traversal depth to prevent stack overflow
+  traverse(probe.binding, depth)
+end
+```
+
+**✅ GOOD - YARD documentation instead:**
+```ruby
+# Captures a snapshot of probe state at execution point
+#
+# @param probe [Probe] The probe to capture
+# @param depth [Integer] Maximum object traversal depth to prevent stack overflow
+#   and unbounded memory usage. Recommended: 3-5 levels.
+# @return [Snapshot] Captured snapshot with object state
+def capture_snapshot(probe, depth)
+  traverse(probe.binding, depth)
+end
+```
+
+**3. Rename parameters to be self-documenting**
+
+**❌ BAD - Comment needed:**
+```ruby
+def process(data, limit)
+  # limit is the timeout in seconds, not a count
+  timeout_at = Time.now + limit
+  # ...
+end
+```
+
+**✅ GOOD - Renamed parameter, comment unnecessary:**
+```ruby
+def process(data, timeout_seconds)
+  timeout_at = Time.now + timeout_seconds
+  # ...
+end
+```
+
+**4. Rename variables to clarify purpose**
+
+**❌ BAD - Comment needed:**
+```ruby
+def install_probe(probe)
+  # result is a hash containing status and error message
+  result = api.install(probe)
+  # ...
+end
+```
+
+**✅ GOOD - Better variable name, comment unnecessary:**
+```ruby
+def install_probe(probe)
+  installation_result = api.install(probe)
+  # ...
+end
+```
+
+**5. Extract methods to make intent explicit**
+
+**❌ BAD - Comment needed:**
+```ruby
+def process_probes
+  probes.each do |probe|
+    # Skip probes that are disabled or already installed
+    next if probe.disabled? || @installed[probe.id]
+    install_probe(probe)
+  end
+end
+```
+
+**✅ GOOD - Extracted method, comment unnecessary:**
+```ruby
+def process_probes
+  probes.each do |probe|
+    next unless should_install_probe?(probe)
+    install_probe(probe)
+  end
+end
+
+private
+
+def should_install_probe?(probe)
+  !probe.disabled? && !@installed[probe.id]
+end
+```
+
+**6. Use constant names instead of magic numbers**
+
+**❌ BAD - Comment needed:**
+```ruby
+def configure_timeout
+  # 5 seconds is the default probe timeout
+  @timeout = 5
+end
+```
+
+**✅ GOOD - Named constant, comment unnecessary:**
+```ruby
+DEFAULT_PROBE_TIMEOUT_SECONDS = 5
+
+def configure_timeout
+  @timeout = DEFAULT_PROBE_TIMEOUT_SECONDS
+end
+```
+
+#### Review Process for Borderline Comments
+
+When you find a comment that has some value but feels borderline:
+
+**Step 1: Identify why the comment seems necessary**
+- Is the code unclear?
+- Is the parameter name vague?
+- Is the test description example-focused?
+- Is method documentation missing?
+
+**Step 2: Determine the code improvement**
+- Expand test description to capture true intent
+- Add/improve YARD documentation
+- Rename parameters/variables
+- Extract methods
+- Introduce named constants
+
+**Step 3: Recommend the improvement**
+Instead of accepting the comment, recommend:
+```markdown
+This comment indicates that the [test description/parameter name/method] could be clearer.
+
+Suggested improvement:
+- Current: [show current code with comment]
+- Better: [show improved code without comment]
+
+This makes the comment unnecessary by improving the code itself.
+```
+
+#### Examples of Review Feedback
+
+**Example 1: Test description too example-focused**
+
+```markdown
+This comment is needed because the test description focuses on the specific example value rather than the behavior being verified.
+
+Current:
+\`\`\`ruby
+it 'returns false when buffer has 100 items' do
+  # Test verifies buffer capacity limit enforcement
+  expect(buffer.add_item(item)).to be false
+end
+\`\`\`
+
+Better - capture the true intent:
+\`\`\`ruby
+it 'rejects items when buffer is at capacity' do
+  expect(buffer.add_item(item)).to be false
+end
+\`\`\`
+
+The improved description explains **what behavior** is being tested (capacity enforcement) rather than **what value** is used (100 items). This makes the comment unnecessary.
+```
+
+**Example 2: Parameter needs clarification**
+
+```markdown
+This comment is needed because the parameter name is ambiguous.
+
+Current:
+\`\`\`ruby
+def capture(binding, limit)
+  # limit is max capture depth, not timeout
+  traverse(binding, limit)
+end
+\`\`\`
+
+Better - rename parameter:
+\`\`\`ruby
+def capture(binding, max_depth)
+  traverse(binding, max_depth)
+end
+\`\`\`
+
+Or add YARD documentation:
+\`\`\`ruby
+# @param limit [Integer] Maximum capture depth (object traversal levels)
+def capture(binding, limit)
+  traverse(binding, limit)
+end
+\`\`\`
+```
+
+**Example 3: Method documentation should be expanded**
+
+```markdown
+These inline comments should be incorporated into YARD documentation.
+
+Current:
+\`\`\`ruby
+def process_snapshot(snapshot)
+  # Filters out sensitive fields before serialization
+  filtered = filter_sensitive(snapshot)
+  JSON.dump(filtered)
+end
+\`\`\`
+
+Better - expand method documentation:
+\`\`\`ruby
+# Processes snapshot for transmission by removing sensitive fields
+#
+# Filters out sensitive data (passwords, keys, tokens) before JSON
+# serialization to prevent accidental leakage in logs/telemetry.
+#
+# @param snapshot [Snapshot] Raw snapshot from probe execution
+# @return [String] JSON-serialized snapshot with sensitive data removed
+def process_snapshot(snapshot)
+  filtered = filter_sensitive(snapshot)
+  JSON.dump(filtered)
+end
+\`\`\`
+```
+
+#### Special Consideration: Test Descriptions and True Intent
+
+**Critical principle:** Test descriptions must capture the **true intent** of what's being verified, not just describe the specific example values or test setup.
+
+**Common mistake: Example-focused descriptions**
+
+These descriptions describe the test's **specifics** rather than its **purpose**:
+
+**❌ Examples of example-focused descriptions:**
+```ruby
+it 'with timeout of 5 and depth of 3' do
+  # What behavior are we verifying? Description doesn't say!
+end
+
+it 'when probe has id "abc-123"' do
+  # Why does the ID matter? Description doesn't explain!
+end
+
+it 'returns array with 2 elements' do
+  # Why 2? What does this test actually verify?
+end
+
+it 'sets value to 42' do
+  # What behavior is 42 testing? Description is tied to example!
+end
+```
+
+**✅ Examples of intent-focused descriptions:**
+```ruby
+it 'respects configured timeout limits' do
+  # Clear: testing timeout limit enforcement (5 seconds is just an example)
+end
+
+it 'isolates probe state by unique identifier' do
+  # Clear: testing isolation ("abc-123" is just an example)
+end
+
+it 'returns all matching probes' do
+  # Clear: testing filtering behavior (2 elements is the expected result)
+end
+
+it 'uses default value when configuration is missing' do
+  # Clear: testing default behavior (42 is the default value)
+end
+```
+
+**How to transform example-focused to intent-focused:**
+
+1. **Ask: "What would break if I changed the example value?"**
+   - If nothing would break, the description is too example-focused
+   - The description should explain what **behavior** would break
+
+2. **Ask: "What general principle am I testing?"**
+   - Not "does it return 3?"
+   - But "does it respect the depth limit?"
+
+3. **Ask: "Why do I care about this test passing?"**
+   - Not "because probe ID is test-123"
+   - But "because probes need isolation"
+
+4. **Remove specific values from description:**
+   - Not "when timeout is 5 seconds"
+   - But "when timeout is exceeded"
+
+**Before accepting a comment in a test, ask:**
+- Could the test description better capture the true intent?
+- Is the description focused on the example instead of the behavior?
+- Would someone understand **why** this test exists from the description alone?
+
 ### Common Patterns of Useless Comments
 
 **Pattern 1: Implementation narration**
@@ -3271,14 +3623,24 @@ echo "Total comments to review: $total"
 cat /tmp/all_comments.txt
 ```
 
-**Step 3: Identify useless comments**
+**Step 3: Identify useless and borderline comments**
 For each comment, ask:
-- Does it restate what code does?
-- Is it obvious from reading the code?
+- Does it restate what code does? → Useless, remove
+- Is it obvious from reading the code? → Useless, remove
 - Would removing it reduce clarity? (No = useless)
+- For borderline comments: Could the code be improved to make this unnecessary?
+  - Test description too example-focused?
+  - Parameter name unclear?
+  - Method documentation missing?
+  - Variable name vague?
 
-**Step 4: Demand removal of ALL useless comments**
-List every single useless comment with file and line number.
+**Step 4: Demand removal or recommend improvements**
+- **Clearly useless comments:** List with file and line number, demand removal
+- **Borderline comments:** Recommend code improvements to make them unnecessary
+  - Expand test descriptions to capture true intent (not example values)
+  - Add/expand YARD documentation
+  - Rename parameters/variables for clarity
+  - Extract methods to make intent explicit
 
 ### Feedback Template
 
@@ -3287,14 +3649,15 @@ When useless comments are found:
 ```markdown
 ❌ Useless comments found in PR
 
-**Overview:** Found X comments that restate what the code does instead of explaining WHY. These must be removed.
+**Overview:** Found X comments that restate what the code does instead of explaining WHY. These must be removed or made unnecessary through code improvements.
 
 **Systematic review:**
 - Total comments added in PR: Y
-- Useless comments found: X
-- Useful comments: (Y - X)
+- Clearly useless comments: X
+- Borderline comments (need code improvements): Z
+- Useful comments: (Y - X - Z)
 
-**Comments to remove:**
+**Comments to remove (clearly useless):**
 
 1. **lib/datadog/di/component.rb:89**
    ```ruby
@@ -3332,6 +3695,78 @@ When useless comments are found:
 
    **Action:** Remove the comment.
 
+**Borderline comments (make unnecessary through code improvements):**
+
+4. **spec/datadog/di/probe_manager_spec.rb:234**
+   ```ruby
+   it 'returns false when buffer has 100 items' do
+     # Test verifies buffer capacity limit enforcement
+     expect(buffer.add_item(item)).to be false
+   end
+   ```
+
+   **Issue:** Comment explains test intent, but description is too example-focused.
+
+   **Why borderline:** The comment has value (explains intent) but shouldn't be needed.
+
+   **Code improvement:** Expand test description to capture true intent:
+   ```ruby
+   it 'rejects items when buffer is at capacity' do
+     expect(buffer.add_item(item)).to be false
+   end
+   ```
+
+   **Action:** Update test description to capture behavior (not example value), remove comment.
+
+5. **lib/datadog/di/snapshot_collector.rb:67**
+   ```ruby
+   def capture(binding, limit)
+     # limit is the max depth, not a count
+     traverse(binding, limit)
+   end
+   ```
+
+   **Issue:** Comment clarifies ambiguous parameter name.
+
+   **Why borderline:** Provides useful clarification but indicates poor naming.
+
+   **Code improvement:** Rename parameter for clarity:
+   ```ruby
+   def capture(binding, max_depth)
+     traverse(binding, max_depth)
+   end
+   ```
+
+   **Action:** Rename `limit` to `max_depth`, remove comment.
+
+6. **lib/datadog/di/probe_executor.rb:89**
+   ```ruby
+   def execute_probe(probe)
+     # Executes the probe and collects snapshot data
+     snapshot = probe.capture
+     snapshot
+   end
+   ```
+
+   **Issue:** Comment restates method functionality.
+
+   **Why borderline:** Adds some context but mostly obvious from code.
+
+   **Code improvement:** Add YARD documentation instead:
+   ```ruby
+   # Executes probe and captures runtime state
+   #
+   # @param probe [Probe] The probe to execute
+   # @return [Snapshot] Captured runtime state including variables and call stack
+   # @raise [ProbeExecutionError] if probe execution fails
+   def execute_probe(probe)
+     snapshot = probe.capture
+     snapshot
+   end
+   ```
+
+   **Action:** Move comment to YARD documentation (expanded), remove inline comment.
+
 **What makes a comment useful:**
 - Explains WHY a decision was made (not WHAT is being done)
 - Documents non-obvious constraints or requirements
@@ -3362,7 +3797,12 @@ probe_repository = Datadog::DI::ProbeRepository.new
 ```
 
 **Required action:**
-- Remove ALL useless comments listed above
+- Remove ALL clearly useless comments listed above
+- For borderline comments: Improve code to make comments unnecessary
+  - Expand test descriptions to capture true intent (not example values)
+  - Add/expand YARD documentation for methods
+  - Rename parameters/variables for clarity
+  - Extract methods to make intent explicit
 - Use meaningful method/variable names instead of comments
 - Only keep comments that explain WHY, not WHAT
 - Use YARD docstrings for method documentation (see Section 7)
@@ -3392,10 +3832,17 @@ cat /tmp/comments.txt
 # Step 4: For each file with comments, read the context
 # Don't just look at grep output - read the actual file to see if comment adds value
 
-# Step 5: Identify useless comments
-# Ask: Does this explain WHY or just restate WHAT?
+# Step 5: Categorize comments
+# For each comment ask:
+#   - Does it explain WHY or just restate WHAT?
+#   - If borderline: Could code improvements make this unnecessary?
+#     * Test description too example-focused? (expand to capture true intent)
+#     * Parameter name unclear? (rename parameter)
+#     * Method missing documentation? (add YARD docstring)
 
-# Step 6: List ALL useless comments in feedback
+# Step 6: List ALL useless comments and recommend improvements for borderline ones
+# - Clearly useless: Demand removal
+# - Borderline: Suggest code improvements to make comment unnecessary
 ```
 
 **Common sources of useless comments:**
@@ -3429,12 +3876,18 @@ cat /tmp/comments.txt
 - Only add comments when code alone isn't sufficient
 - Ask: "Does this comment explain WHY?"
 - If explaining WHAT, improve the code instead
+- For tests: Write descriptions that capture true intent, not example values
 
 **During review:**
 - Systematically check ALL comments
 - Apply the evaluation questions
-- Be strict: when in doubt, remove it
-- Better to have no comment than a useless one
+- Be strict: when in doubt, remove it or suggest code improvement
+- For borderline comments: Recommend improvements to make them unnecessary
+  - Expand test descriptions to focus on behavior, not examples
+  - Add/expand YARD documentation
+  - Rename parameters/variables
+  - Extract methods
+- Better to improve code than to accept a borderline comment
 
 ## Review Checklist
 
