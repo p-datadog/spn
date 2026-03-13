@@ -2157,6 +2157,265 @@ When hardcoded /tmp paths are found:
 - Run tests in parallel to confirm no collisions: `bundle exec rspec --order random`
 ```
 
+## Test Code Style: Prefer Tap Pattern for Let Declarations
+
+**Overview:** When declaring test doubles or objects with `let` that require configuration (stubs, mocks, expectations), prefer the `tap` pattern over intermediate variables.
+
+**Critical Requirement:** In test suite `let` declarations, use `tap` to configure objects inline rather than creating intermediate variables.
+
+### Why Tap Pattern Is Preferred
+
+**Clarity:**
+- Self-contained configuration
+- Clear intent: "create and configure this object"
+- No intermediate variable pollution
+
+**Conciseness:**
+- Fewer lines of code
+- Implicit return (tap returns the receiver)
+- No need for explicit variable and return statement
+
+**Ruby idiom:**
+- Widely recognized pattern for object configuration
+- Consistent with Ruby community best practices
+- Reduces cognitive load for readers
+
+### What to Flag
+
+**❌ Flag intermediate variable pattern:**
+
+```ruby
+# BAD - Intermediate variable with explicit return
+let(:probe_notification_builder) do
+  builder = instance_double(Datadog::DI::ProbeNotificationBuilder)
+  allow(builder).to receive(:send).with(:build_status, anything, hash_including(:message, :status, :exception)).and_return({status: 'ERROR'})
+  builder
+end
+
+# BAD - Multiple intermediate variables
+let(:probe_manager) do
+  manager = instance_double(Datadog::DI::ProbeManager)
+  allow(manager).to receive(:install_probe).and_return(true)
+  allow(manager).to receive(:remove_probe).and_return(true)
+  manager
+end
+```
+
+**✅ Prefer tap pattern:**
+
+```ruby
+# GOOD - Tap pattern, self-contained
+let(:probe_notification_builder) do
+  instance_double(Datadog::DI::ProbeNotificationBuilder).tap do |builder|
+    allow(builder).to receive(:send).with(:build_status, anything, hash_including(:message, :status, :exception)).and_return({status: 'ERROR'})
+  end
+end
+
+# GOOD - Multiple stubs with tap
+let(:probe_manager) do
+  instance_double(Datadog::DI::ProbeManager).tap do |manager|
+    allow(manager).to receive(:install_probe).and_return(true)
+    allow(manager).to receive(:remove_probe).and_return(true)
+  end
+end
+```
+
+### When to Use Tap Pattern
+
+**✅ Use tap when:**
+- Creating test doubles (instance_double, double, class_double)
+- Configuring objects with stubs or mocks
+- Setting up expectations on objects
+- Any object requiring post-creation configuration
+
+**❌ Don't need tap when:**
+- Simple value assignment (let(:timeout) { 30 })
+- Single method call with no configuration (let(:time) { Time.now })
+- Object doesn't need configuration after creation
+
+### Examples
+
+**Example 1: Test double with single stub**
+
+```ruby
+# ❌ BAD
+let(:telemetry) do
+  t = instance_double(Datadog::Telemetry)
+  allow(t).to receive(:emit).and_return(true)
+  t
+end
+
+# ✅ GOOD
+let(:telemetry) do
+  instance_double(Datadog::Telemetry).tap do |t|
+    allow(t).to receive(:emit).and_return(true)
+  end
+end
+```
+
+**Example 2: Test double with multiple stubs**
+
+```ruby
+# ❌ BAD
+let(:settings) do
+  s = instance_double(Datadog::DI::Settings)
+  allow(s).to receive(:enabled).and_return(true)
+  allow(s).to receive(:max_capture_depth).and_return(3)
+  allow(s).to receive(:timeout).and_return(5)
+  s
+end
+
+# ✅ GOOD
+let(:settings) do
+  instance_double(Datadog::DI::Settings).tap do |s|
+    allow(s).to receive(:enabled).and_return(true)
+    allow(s).to receive(:max_capture_depth).and_return(3)
+    allow(s).to receive(:timeout).and_return(5)
+  end
+end
+```
+
+**Example 3: Real object with configuration**
+
+```ruby
+# ❌ BAD
+let(:probe) do
+  p = Datadog::DI::Probe.new(id: 'test-probe')
+  p.file = 'test.rb'
+  p.line = 42
+  p
+end
+
+# ✅ GOOD
+let(:probe) do
+  Datadog::DI::Probe.new(id: 'test-probe').tap do |p|
+    p.file = 'test.rb'
+    p.line = 42
+  end
+end
+```
+
+**Example 4: Complex setup with hash**
+
+```ruby
+# ❌ BAD
+let(:probe_notification_builder) do
+  builder = instance_double(Datadog::DI::ProbeNotificationBuilder)
+  allow(builder).to receive(:send)
+    .with(:build_status, anything, hash_including(:message, :status, :exception))
+    .and_return({status: 'ERROR'})
+  allow(builder).to receive(:send)
+    .with(:build_snapshot, anything, anything)
+    .and_return({snapshot: 'data'})
+  builder
+end
+
+# ✅ GOOD
+let(:probe_notification_builder) do
+  instance_double(Datadog::DI::ProbeNotificationBuilder).tap do |builder|
+    allow(builder).to receive(:send)
+      .with(:build_status, anything, hash_including(:message, :status, :exception))
+      .and_return({status: 'ERROR'})
+    allow(builder).to receive(:send)
+      .with(:build_snapshot, anything, anything)
+      .and_return({snapshot: 'data'})
+  end
+end
+```
+
+### When Not to Use Tap
+
+**Simple assignments (no tap needed):**
+
+```ruby
+# ✅ GOOD - Simple value, no tap needed
+let(:timeout) { 30 }
+let(:probe_id) { 'test-probe-123' }
+let(:enabled) { true }
+
+# ✅ GOOD - Simple object creation, no configuration
+let(:logger) { Logger.new(nil) }
+let(:time) { Time.now }
+
+# ✅ GOOD - Simple method call
+let(:settings) { Datadog.configuration.dynamic_instrumentation }
+```
+
+### How to Check
+
+Search for `let` declarations with intermediate variables:
+
+```bash
+# Find let blocks with intermediate variable assignment followed by return
+grep -A 5 "let(:" spec/datadog/di/ spec/datadog/symbol_database/ | grep -B 2 "^\s*[a-z_]\+ = "
+
+# Look for patterns like:
+#   let(:name) do
+#     var = ...
+#     ...
+#     var
+#   end
+```
+
+### Review Questions to Ask
+
+When you see a `let` declaration with an intermediate variable:
+
+1. **Is the object being configured after creation?**
+   - If yes, this should use tap pattern
+
+2. **Is there more than just the object creation in the block?**
+   - If configuration/stubs/mocks, use tap pattern
+
+3. **Is there an explicit return of the variable?**
+   - This is a sign tap pattern should be used
+
+4. **Would tap make this more concise and clear?**
+   - Usually yes for test doubles and configured objects
+
+### Example Review Comment
+
+```markdown
+This `let` declaration uses an intermediate variable. Consider using the `tap` pattern for cleaner, more idiomatic code.
+
+Current:
+\`\`\`ruby
+let(:probe_notification_builder) do
+  builder = instance_double(Datadog::DI::ProbeNotificationBuilder)
+  allow(builder).to receive(:send).with(:build_status, anything, hash_including(:message, :status, :exception)).and_return({status: 'ERROR'})
+  builder
+end
+\`\`\`
+
+Suggested:
+\`\`\`ruby
+let(:probe_notification_builder) do
+  instance_double(Datadog::DI::ProbeNotificationBuilder).tap do |builder|
+    allow(builder).to receive(:send).with(:build_status, anything, hash_including(:message, :status, :exception)).and_return({status: 'ERROR'})
+  end
+end
+\`\`\`
+
+Benefits:
+- More concise (no intermediate variable or explicit return)
+- Clear intent (create and configure)
+- Standard Ruby idiom
+```
+
+### Common Counterarguments and Responses
+
+**Argument:** "The intermediate variable is clearer"
+- **Response:** Tap is a standard Ruby idiom that's widely understood. The block parameter serves the same purpose with less noise.
+
+**Argument:** "It's more characters/lines"
+- **Response:** Actually the same or fewer lines when formatted consistently. The conciseness comes from removing the assignment and explicit return.
+
+**Argument:** "I need the variable name for clarity"
+- **Response:** The block parameter provides the same naming: `builder` in tap block vs `builder =` variable.
+
+**Argument:** "Not everyone knows tap"
+- **Response:** Tap is a standard Ruby method in widespread use. Any Ruby developer should be familiar with it, especially in test suites.
+
 ## Debugging Diagnostics Left in PR
 
 **Overview:** Debugging statements and diagnostic code must be removed before merging. These create noise in logs, can leak internal information, and indicate incomplete cleanup.
@@ -2860,6 +3119,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 - [ ] NO debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
 - [ ] NO defaulted positional arguments (challenge: why not keyword arguments? codebase prefers keyword args)
 - [ ] NO nil-defaulted keyword arguments in constructors unless truly optional (analyze production usage)
+- [ ] Prefer tap pattern for let declarations with configuration (no intermediate variables)
 - [ ] TracePoint callbacks have proper cleanup (tp.disable in ensure)
 - [ ] No infinite recursion (instrumentation doesn't trace itself)
 - [ ] Bounded memory usage (no binding leaks)
@@ -2911,6 +3171,7 @@ gh api repos/DataDog/dd-trace-rb/pulls/<PR>/comments --paginate
    - Search for hardcoded /tmp paths
    - Search for defaulted positional arguments (see Defaulted Positional Arguments section)
    - Search for nil-defaulted keyword arguments in constructors (see Nil-Defaulted Keyword Arguments section)
+   - Search for let declarations with intermediate variables (see Test Code Style: Prefer Tap Pattern section)
    - Search for debugging diagnostics (puts, warn, binding.pry, # DEBUG:, # DIAGNOSTIC:)
    - Check code coverage report
    - Verify error boundaries (all TracePoint callbacks, prepended methods)
@@ -3084,6 +3345,17 @@ grep -rn "def initialize.*:.*nil" lib/datadog/di/ lib/datadog/symbol_database/
 # Example analysis for a specific class:
 #   grep -rn "ProbeManager.new" lib/datadog/di/ | grep -v "telemetry:"
 #   # If no results, production always provides telemetry - should be required
+
+# Check for let declarations with intermediate variables (should use tap pattern)
+# Find let blocks with variable assignment followed by configuration
+grep -A 10 "let(:" spec/datadog/di/ spec/datadog/symbol_database/ | grep -B 1 "^\s*[a-z_]\+ = instance_double\|^\s*[a-z_]\+ = double"
+# Review each match: Should this use tap pattern instead?
+# Example:
+#   let(:builder) do
+#     builder = instance_double(...)  # Flag: should use tap
+#     allow(builder).to receive(...)
+#     builder  # Flag: explicit return after config
+#   end
 
 # Check for debugging diagnostics in production code
 grep -rn "^\s*puts\s\|^\s*p\s\|^\s*pp\s\|^\s*print\s" lib/datadog/di/ lib/datadog/symbol_database/
