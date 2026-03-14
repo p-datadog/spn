@@ -228,11 +228,11 @@ All 7 requirements below are **BLOCKING**. PRs must not be approved until all is
 
 | Reason | Wrong Fix | Right Fix |
 |--------|-----------|-----------|
-| "Flaky test" | Skip it | Add synchronization hooks to code (callbacks, queues) |
-| "Timing issues" | Use longer sleep | Add deterministic waits, expose completion signals |
+| "Flaky test" | Skip it | Add synchronization hooks to code (callbacks, queues) - See SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md |
+| "Timing issues" | Use longer sleep | Add deterministic waits, expose completion signals - See SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md |
 | "Hard to test" | Skip it | Refactor code to inject dependencies |
 | "Environment specific" | Skip conditionally | Make code work in all environments or mock environment |
-| "Race condition" | Skip it | Add proper synchronization primitives to code |
+| "Race condition" | Skip it | Add proper synchronization primitives to code - See SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md |
 
 **How to check:**
 ```bash
@@ -267,6 +267,14 @@ Skipped tests create false confidence. This is blocking approval.
 **Requirement:** Tests must use deterministic waits, not arbitrary sleep calls.
 
 **Principle:** Sleep in tests is a symptom of untestable code. The code needs synchronization hooks, not the test needs longer sleeps. (See "Fundamental Principle" section above.)
+
+**📖 Comprehensive Reference:** See [SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md](./SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md) for detailed examples of:
+- Real sleep fix from PR #5448 (before/after comparison)
+- Queue-based synchronization pattern (used in the fix)
+- Flush-based synchronization pattern (standard DI approach)
+- ConditionVariable pattern (for complex state waiting)
+- When to use each pattern
+- Complete working examples with explanations
 
 **Review actions:**
 - Search for sleep patterns:
@@ -465,6 +473,17 @@ When reviewing sleep after flush:
 
 **Default stance: Flush should be sufficient. If it's not, fix flush, don't add sleep.**
 
+**📖 For Detailed Examples and Patterns:**
+
+See [SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md](./SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md) for:
+- Real-world sleep fix from PR #5448 (complete before/after)
+- Queue-based synchronization (wait for specific events)
+- Flush-based synchronization (standard DI pattern)
+- ConditionVariable patterns (waiting for state changes)
+- When to use each pattern with decision tree
+- Complete working code examples
+- Common mistakes and how to avoid them
+
 **How to check:**
 ```bash
 # Search for sleep in tests
@@ -518,6 +537,8 @@ expect(worker.completed?).to be true
 ```
 
 **This requires changing lib/datadog/di/worker.rb, not just the test.**
+
+**📖 See [SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md](./SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md) for more complete examples and patterns.**
 ```
 
 ### 3. 100% Code Coverage (CRITICAL)
@@ -3895,7 +3916,7 @@ When reviewing a dd-trace-rb DI PR, verify:
 
 **CRITICAL (Blocking Approval):**
 - [ ] ✅ NO skipped tests (no skip, pending, xit, xdescribe)
-- [ ] ✅ NO sleep in tests (use Queue, ConditionVariable, mock time)
+- [ ] ✅ NO sleep in tests (use Queue, ConditionVariable, mock time) - See SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md
 - [ ] ✅ 100% code coverage (all lines, branches, error paths)
 - [ ] ✅ Complies with repository guidelines (CLAUDE.md, CONTRIBUTING.md, CI checks)
 - [ ] ✅ NO exception propagation (all instrumentation errors contained)
@@ -4114,6 +4135,7 @@ gh pr diff <PR_NUMBER> | grep -n "^\+.*#" | grep -v "frozen_string_literal"
 grep -rn "^\s*skip\|^\s*pending\|^\s*xit\|^\s*xdescribe" spec/ test/
 
 # Check for sleep in tests
+# See SLEEP_FIX_AND_SYNCHRONIZATION_PATTERNS.md for proper synchronization patterns
 grep -rn "sleep\s\|Kernel\.sleep" spec/ test/
 
 # Check for hardcoded /tmp paths
