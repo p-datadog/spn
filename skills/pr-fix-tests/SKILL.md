@@ -13,14 +13,15 @@ This skill automatically fixes test failures in a pull request. Each fix is comm
 The skill automates the process of:
 1. Fetching a specific pull request
 2. **Reading CLAUDE.md** - Understanding repository coding guidelines
-3. Checking CI job status to identify test failures
+3. Checking CI job status to identify ALL test failures
 4. Filtering for TEST failures only (not lint/static analysis/typing)
-5. Analyzing and fixing each test failure
-6. **Applying CLAUDE.md rules** - Ensuring fixes follow all guidelines
-7. Committing each fix with a descriptive message
-8. Pushing all commits to the PR branch
-9. **Continuously monitoring CI status** (polling every minute)
-10. **Fixing any new or remaining test failures** until all tests pass
+5. **Iterating through EVERY failed test job** - Categorizing infrastructure vs code failures
+6. Analyzing and fixing test failures in **ALL non-infrastructure jobs**
+7. **Applying CLAUDE.md rules** - Ensuring fixes follow all guidelines
+8. Committing each fix with a descriptive message
+9. Pushing all commits from ALL jobs to the PR branch
+10. **Continuously monitoring CI status** (polling every minute)
+11. **Fixing any new or remaining test failures in ALL jobs** until all tests pass
 
 ## Default Behavior
 
@@ -31,6 +32,35 @@ The skill automates the process of:
 4. ✅ No user confirmation required
 
 This is the **default behavior**. Fixes are committed and pushed automatically until all tests pass.
+
+## ⚠️ CRITICAL REQUIREMENT: Process ALL Failed Jobs
+
+**This skill MUST process EVERY failed test job in each round, not just the first one.**
+
+A PR may have multiple test jobs failing simultaneously:
+- Test (Ruby 2.7) - 2 failures
+- Test (Ruby 3.1) - 2 failures
+- Jest Tests - 1 failure
+
+**Incorrect approach:**
+- ❌ Fix Ruby 2.7, push
+- ❌ Fix Ruby 3.1, push
+- ❌ Fix Jest, push
+
+**Correct approach:**
+- ✅ Categorize ALL failed jobs (infrastructure vs test failures)
+- ✅ Fix Ruby 2.7 failures, commit
+- ✅ Fix Ruby 3.1 failures, commit
+- ✅ Fix Jest failures, commit
+- ✅ Push ALL commits together
+
+**Why this matters:**
+- More efficient (one round instead of three)
+- Fewer CI runs (saves resources)
+- Faster feedback (all failures addressed together)
+- Each job may have unique failures requiring different fixes
+
+**Implementation:** Use bash loops to iterate through ALL jobs in the test_failure_jobs array before proceeding to push.
 
 ## When This Skill Applies
 
@@ -135,6 +165,16 @@ When a test fails inconsistently or shows signs of being flaky:
 
 ## Workflow
 
+**⚠️ CRITICAL: Process ALL Failed Test Jobs**
+
+This skill MUST iterate through EVERY failed test job. Do not stop after fixing the first job.
+
+Common mistake:
+- ❌ Fix first failed job, push, and wait
+- ✅ Fix ALL failed jobs, then push
+
+Each CI run may have multiple test jobs failing (Ruby 2.7, Ruby 3.1, Jest, etc.). All must be analyzed and fixed in a single round before pushing.
+
 **Preferred approach for test failure analysis:**
 
 1. **Always try JUnit artifacts FIRST** (Step 3.5)
@@ -151,13 +191,17 @@ When a test fails inconsistently or shows signs of being flaky:
 
 1. Read repository guidelines (CLAUDE.md) and review requirements
 2. Fetch PR and check CI status
-3. Identify failed test jobs
-4. **→ Check for infrastructure failures** (scan logs, skip if found)
-5. **→ Download and analyze JUnit artifacts** (preferred, for non-infra failures)
-6. → Fall back to log parsing (if artifacts unavailable)
-7. Fix test failures (commit separately)
-8. Push commits and monitor CI
-9. Repeat until all tests pass
+3. Identify ALL failed test jobs
+4. **→ For EACH failed job: Check for infrastructure failures** (scan logs, restart if found)
+5. **→ For EACH non-infrastructure test failure job:**
+   - **→ Download and analyze JUnit artifacts** (preferred method)
+   - → Fall back to log parsing (if artifacts unavailable)
+   - → Fix test failures in this job (commit separately)
+6. Push ALL commits from ALL jobs
+7. Monitor CI continuously
+8. Repeat steps 3-6 until all tests pass
+
+**CRITICAL:** Process ALL failed jobs, not just the first one. Each job may have different test failures that need fixing.
 
 ### Step 1: Read Repository Guidelines and Review Requirements
 
@@ -915,16 +959,42 @@ while true; do
     echo "Failed checks:"
     echo "$failed_checks"
 
-    # IMPORTANT: Filter out infrastructure failures
-    # Check each failed job for infrastructure patterns
-    # Only fix jobs that are actual test failures, not infrastructure issues
-    # (Infrastructure failures should be restarted via /crcj)
+    # CRITICAL: Categorize ALL failed jobs (infrastructure vs test failures)
+    # Process EVERY job, not just the first one
+    infrastructure_jobs=()
+    test_failure_jobs=()
 
-    # Analyze and fix each failure (same process as initial fixes)
-    # ... (follow Steps 3.5-7 again for new failures)
+    # Categorize each failed job
+    while IFS= read -r job_name; do
+      run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
+        jq -r ".[] | select(.name == \"$job_name\") | .link" | \
+        grep -oP 'runs/\K[0-9]+')
 
-    # After fixing and pushing, restart the monitoring loop
-    echo "Fixes pushed, restarting CI monitoring..."
+      # Check for infrastructure failure
+      log_file=$(mktemp)
+      gh run view $run_id --log 2>&1 | head -500 > "$log_file"
+
+      if grep -qE '(fatal: could not read|401 \(Unauthorized\)|failed to download action|Connection timed out|No space left)' "$log_file"; then
+        echo "  🔄 INFRASTRUCTURE: $job_name (restarting)"
+        infrastructure_jobs+=("$job_name")
+        gh run rerun $run_id --failed
+      else
+        echo "  🔍 TEST FAILURE: $job_name (will fix)"
+        test_failure_jobs+=("$job_name")
+      fi
+      rm -f "$log_file"
+    done <<< "$failed_checks"
+
+    # Fix ALL test failure jobs (iterate through each one)
+    for job_name in "${test_failure_jobs[@]}"; do
+      echo "=== Fixing $job_name ==="
+      # Analyze JUnit artifacts or logs for this specific job
+      # Fix identified failures
+      # Commit fixes
+    done
+
+    # After fixing and pushing ALL jobs, restart the monitoring loop
+    echo "Fixes from all jobs pushed, restarting CI monitoring..."
     sleep 30
     iteration=1
     continue
@@ -1056,6 +1126,10 @@ pytest
 
 ## Implementation Steps
 
+**CRITICAL: Process ALL failed test jobs, not just the first one.**
+
+This skill must iterate through EVERY failed test job to ensure all test failures are fixed in a single round. Each job may have different failures requiring different fixes.
+
 When the skill is invoked with a PR number:
 
 1. **Checkout PR:**
@@ -1107,17 +1181,67 @@ EOF
    fi
    ```
 
-4. **For each non-infrastructure test failure:**
-   - Download and analyze JUnit artifacts (preferred) or logs
-   - Identify which test file(s) are failing
-   - Read the test file and understand what's expected
-   - Read the source code being tested
-   - Determine the root cause
-   - Fix the issue (in test file or source code as needed)
-   - Run the test locally to verify fix
-   - Commit with descriptive message
+4. **For EACH non-infrastructure test failure, analyze and fix:**
+   ```bash
+   # CRITICAL: Iterate through ALL test failure jobs, not just the first one
+   echo "=== Test Failures to Fix ==="
+   printf '  - %s\n' "${test_failure_jobs[@]}"
+   echo ""
 
-4. **Count commits made:**
+   # Process each failed test job
+   for job_name in "${test_failure_jobs[@]}"; do
+     echo "=== Analyzing $job_name ==="
+
+     # Get run ID for this job
+     run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
+       jq -r ".[] | select(.name == \"$job_name\") | .link" | \
+       grep -oP 'runs/\K[0-9]+')
+
+     # Try JUnit artifacts first (preferred method)
+     echo "Checking for JUnit artifacts..."
+     junit_artifacts=$(gh api /repos/DataDog/dd-trace-rb/actions/runs/$run_id/artifacts --paginate | \
+       jq -r '.artifacts[] | select(.name | startswith("junit-")) | .name')
+
+     if [ -n "$junit_artifacts" ]; then
+       echo "Found JUnit artifacts, downloading..."
+       temp_dir=$(mktemp -d)
+       cd "$temp_dir"
+
+       # Download all JUnit artifacts
+       for artifact in $junit_artifacts; do
+         gh run download $run_id --repo DataDog/dd-trace-rb --name "$artifact"
+       done
+
+       # Parse failures from XML
+       echo "Parsing test failures from JUnit XML..."
+       # (Parse XML, identify failures, extract details)
+
+       cd - > /dev/null
+       rm -rf "$temp_dir"
+     else
+       echo "No JUnit artifacts, falling back to log parsing..."
+       log_file=$(mktemp)
+       gh run view $run_id --log > "$log_file"
+       # (Parse logs to identify test failures)
+       rm -f "$log_file"
+     fi
+
+     # Fix identified test failures
+     # - Read test files
+     # - Read source code
+     # - Determine root cause
+     # - Make minimal fix
+     # - Run test locally to verify
+     # - Commit with descriptive message
+
+     echo "✅ Completed analysis and fixes for $job_name"
+     echo ""
+   done
+   ```
+
+   **Key principle:** Process ALL jobs in test_failure_jobs array before pushing.
+
+5. **Count commits made:**
    ```bash
    commits_made=$(git log origin/$(git branch --show-current)..HEAD --oneline | wc -l)
    ```
@@ -1166,9 +1290,42 @@ EOF
        echo "Found $failed failure(s), fixing..."
        fix_rounds=$((fix_rounds + 1))
 
-       # Filter out infrastructure failures first (Step 3)
-       # Then repeat steps 3.5-8 for new non-infrastructure failures
-       # (check infra, analyze, fix, commit, push)
+       # Get list of failed test jobs
+       failed_job_names=$(echo "$checks" | jq -r '.[] | select(.state == "FAILURE") | .name')
+
+       # CRITICAL: Categorize and fix ALL failed jobs, not just the first one
+       infrastructure_jobs=()
+       test_failure_jobs=()
+
+       # Categorize each failed job
+       while IFS= read -r job_name; do
+         run_id=$(gh pr checks <PR_NUMBER> --json name,link | \
+           jq -r ".[] | select(.name == \"$job_name\") | .link" | \
+           grep -oP 'runs/\K[0-9]+')
+
+         # Check for infrastructure failure
+         log_file=$(mktemp)
+         gh run view $run_id --log 2>&1 | head -500 > "$log_file"
+
+         if grep -qE '(fatal: could not read|401 \(Unauthorized\)|failed to download action|Connection timed out|No space left)' "$log_file"; then
+           echo "  🔄 INFRASTRUCTURE: $job_name (restarting)"
+           infrastructure_jobs+=("$job_name")
+           gh run rerun $run_id --failed
+         else
+           echo "  🔍 TEST FAILURE: $job_name (will fix)"
+           test_failure_jobs+=("$job_name")
+         fi
+         rm -f "$log_file"
+       done <<< "$failed_job_names"
+
+       # Fix ALL test failure jobs (iterate through each one)
+       for job_name in "${test_failure_jobs[@]}"; do
+         echo "=== Fixing $job_name ==="
+         # (Analyze JUnit artifacts or logs, fix failures, commit)
+       done
+
+       # Push all fixes from this round
+       git push origin HEAD
 
        sleep 30  # Wait for CI to start
        iteration=1
@@ -1308,6 +1465,18 @@ Root cause: Method signature changed, mock needs update
 ## Fixing spec/services/processor_spec.rb...
 ✅ Committed: Update service mock to match new signature
 
+## Analyzing Test (Ruby 3.1) failures...
+
+### Failure 1: spec/models/user_spec.rb:45
+Error: expected "active" but got "activated"
+Root cause: Same as Ruby 2.7 (already fixed)
+
+### Failure 2: spec/services/processor_spec.rb:112
+Error: wrong number of arguments (1 for 2)
+Root cause: Same as Ruby 2.7 (already fixed)
+
+No additional fixes needed (same failures as Ruby 2.7)
+
 ## Analyzing Jest Tests failures...
 
 ### Failure: __tests__/payment.test.js:34
@@ -1322,11 +1491,15 @@ Root cause: Missing await on async function
 
 ## Summary - Initial Round
 - Total checks analyzed: 5
-- Non-test jobs skipped: 1
-- Infrastructure failures restarted: 1
-- Test failures fixed: 3
+- Non-test jobs skipped: 1 (StandardRB)
+- Infrastructure failures restarted: 1 (Test Ruby 3.0)
+- Test failure jobs processed: 3 (Ruby 2.7, Ruby 3.1, Jest Tests)
+- Unique test failures fixed: 3
 - Commits created: 3
 - Commits pushed: 3
+
+**Note:** All 3 test failure jobs were analyzed. Ruby 3.1 had the same
+failures as Ruby 2.7, which were already fixed.
 
 ## Monitoring CI for remaining failures...
 Waiting for CI to start running new checks...
@@ -1383,6 +1556,17 @@ Test checks: 12 passed, 0 failed, 0 running
 ```
 
 ## Edge Cases
+
+**Multiple test jobs failing simultaneously:**
+- **CRITICAL:** Process ALL failed jobs in one round, don't fix them sequentially
+- Categorize each job (infrastructure vs test failure)
+- Fix all test failure jobs before pushing
+- Example: If Ruby 2.7, Ruby 3.1, and Jest all fail:
+  1. Analyze Ruby 2.7 → fix → commit
+  2. Analyze Ruby 3.1 → fix → commit
+  3. Analyze Jest → fix → commit
+  4. Push all commits together
+- This is more efficient than fixing one job, pushing, waiting for CI, then fixing the next
 
 **Multiple test failures in same file:**
 - Fix all failures in one file
@@ -1727,22 +1911,23 @@ Before committing each fix, verify:
 
 ## Best Practices
 
-1. **One commit per logical fix** - Group related fixes, separate unrelated ones
-2. **Descriptive commit messages** - Clearly state what test was fixed and why
-3. **Always include test location** - File and line number in commit message
-4. **Verify fixes locally** - Run tests before pushing when possible
-5. **Run targeted tests, not full suite** - Prefer specific test examples, single files, or component directories (spec/datadog/di/) over spec:main which is slow
-6. **Fix root cause, not symptoms** - Don't just change assertions to pass
-6. **Minimal changes** - Don't refactor or add features while fixing tests
-7. **Include Co-Authored-By** - Credit Claude in all commits
-8. **Read failure logs carefully** - Understand before fixing
-9. **Keep related changes together** - Fix test + source code in same commit if related
-10. **Push after each fix round** - Push commits, then monitor CI for new failures
-11. **Monitor continuously** - Poll CI every 1 minute until all tests pass
-12. **Be patient with CI** - Wait for running checks to complete before analyzing failures
-13. **Fix iteratively** - Each round of failures gets its own commits and push
-14. **Set reasonable limits** - Stop after 10 fix rounds and request manual review
-15. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
+1. **Process ALL failed jobs** - Iterate through every failed test job, not just the first one
+2. **One commit per logical fix** - Group related fixes, separate unrelated ones
+3. **Descriptive commit messages** - Clearly state what test was fixed and why
+4. **Always include test location** - File and line number in commit message
+5. **Verify fixes locally** - Run tests before pushing when possible
+6. **Run targeted tests, not full suite** - Prefer specific test examples, single files, or component directories (spec/datadog/di/) over spec:main which is slow
+7. **Fix root cause, not symptoms** - Don't just change assertions to pass
+8. **Minimal changes** - Don't refactor or add features while fixing tests
+9. **Include Co-Authored-By** - Credit Claude in all commits
+10. **Read failure logs carefully** - Understand before fixing
+11. **Keep related changes together** - Fix test + source code in same commit if related
+12. **Push after each fix round** - Push commits from ALL jobs, then monitor CI for new failures
+13. **Monitor continuously** - Poll CI every 1 minute until all tests pass
+14. **Be patient with CI** - Wait for running checks to complete before analyzing failures
+15. **Fix iteratively** - Each round of failures gets its own commits and push
+16. **Set reasonable limits** - Stop after 10 fix rounds and request manual review
+17. **Follow code style** - Use trailing commas in di/ and symbol_database/ (see CLAUDE.md)
 
 ## Safety Checks
 
@@ -1755,6 +1940,7 @@ Before pushing:
 
 ## Notes
 
+- **CRITICAL: Process ALL failed jobs** - Don't stop after fixing the first failure; iterate through every failed test job
 - Test failures often indicate bugs in the source code, not just test issues
 - Some test failures require understanding business logic
 - **Prefer targeted test runs** - Run specific examples, files, or component directories instead of the full spec:main suite which takes a long time
@@ -1768,3 +1954,4 @@ Before pushing:
 - New test failures can appear after fixing others (cascading failures)
 - Be patient - CI runs take time, poll at 1-minute intervals
 - The skill keeps working until all tests pass or manual review is needed
+- **Each fix round must process ALL failed jobs** - During monitoring, when failures appear, categorize and fix every one before pushing
